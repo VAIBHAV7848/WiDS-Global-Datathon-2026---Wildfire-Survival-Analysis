@@ -58,6 +58,48 @@ print(f"  Train: {train.shape[0]} rows × {train.shape[1]} cols")
 print(f"  Test:  {test.shape[0]} rows × {test.shape[1]} cols")
 print(f"  Submission: {sample_sub.shape[0]} rows")
 print(f"\n  Event=1 (hit): {(train['event'] == 1).sum()}")
+
+# === TOP-2 HACK: PSEUDO-LABEL INJECTION ===
+import os
+sub_a_path = r'd:\WiDS\submission_A.csv'
+if os.path.exists(sub_a_path):
+    print("\n  [🚨 TOP-2 HACK ACTIVATED: PSEUDO-LABEL INJECTION] 🚨")
+    sub_a = pd.read_csv(sub_a_path)
+    
+    # 1. Extreme Positives (almost guaranteed to hit by 12h)
+    high_pos = sub_a[sub_a['prob_12h'] >= 0.80].copy()
+    
+    # 2. Extreme Negatives (almost guaranteed to never hit by 72h)
+    high_neg = sub_a[sub_a['prob_72h'] <= 0.18].copy()
+    
+    pseudo_rows = []
+    
+    print(f"    Found {len(high_pos)} pseudo-positives (>=0.80 confident at 12h)")
+    if len(high_pos) > 0:
+        pos_test = test[test['event_id'].isin(high_pos['event_id'])].copy()
+        pos_test['event'] = 1
+        pos_test['time_to_hit_hours'] = 11.9  # hits before 12h
+        pseudo_rows.append(pos_test)
+        
+    print(f"    Found {len(high_neg)} pseudo-negatives (<=0.18 confident at 72h)")
+    if len(high_neg) > 0:
+        neg_test = test[test['event_id'].isin(high_neg['event_id'])].copy()
+        neg_test['event'] = 0
+        neg_test['time_to_hit_hours'] = 999.0 # never hits
+        pseudo_rows.append(neg_test)
+        
+    if pseudo_rows:
+        pseudo_df = pd.concat(pseudo_rows, ignore_index=True)
+        # Sort columns to match train just in case
+        for col in train.columns:
+            if col not in pseudo_df.columns:
+                pseudo_df[col] = np.nan
+        pseudo_df = pseudo_df[train.columns]
+        
+        train = pd.concat([train, pseudo_df], ignore_index=True)
+        print(f"    [+] Successfully injected {len(pseudo_df)} test rows into TRAINING DATA.")
+        print(f"    [+] New Train dataset size: {train.shape[0]} rows (was 223)")
+        print(f"    [+] Updated Event=1 (hit): {(train['event'] == 1).sum()}")
 print(f"  Event=0 (censored): {(train['event'] == 0).sum()}")
 print(f"  Hit rate: {train['event'].mean():.4f}")
 
