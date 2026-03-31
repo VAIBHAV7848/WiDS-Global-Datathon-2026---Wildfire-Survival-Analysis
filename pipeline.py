@@ -106,10 +106,6 @@ def engineer_features(df):
     out['is_close'] = (df['dist_min_ci_0_5h'] < 5000).astype(float)
     out['along_track_abs'] = df['along_track_speed'].abs()
     
-    # FIX #6: Ranking features for C-index boost
-    out['rank_dist'] = out['dist_min_ci_0_5h'].rank(pct=True)
-    out['rank_speed'] = out['closing_speed_m_per_h'].rank(pct=True)
-    
     return out
 
 train_fe = engineer_features(train)
@@ -129,7 +125,6 @@ engineered_features = [
     'log_dist_min', 'time_to_hit_projected', 'directional_threat',
     'growth_threat', 'dist_change_rate', 'fire_intensity',
     'closing_velocity', 'proximity_threat', 'is_close', 'along_track_abs',
-    'rank_dist', 'rank_speed',  # FIX #6: ranking features
 ]
 
 all_features = base_features + engineered_features
@@ -521,26 +516,15 @@ for horizon in time_horizons:
         print(f"  {horizon}h: Single class — cannot compute AUC")
 
 # ============================================================
-# PHASE 8 — POST-PROCESSING (FIX #8, #9, #10, #11)
+# PHASE 8 — MONOTONICITY ENFORCEMENT (Clean)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 8 — POST-PROCESSING")
+print("PHASE 8 — MONOTONICITY ENFORCEMENT")
 print("=" * 70)
 
 pred_matrix = np.column_stack([ensemble_test[t] for t in time_horizons])
 
-# FIX #9: Time-aware scaling
-time_weights = np.array([0.9, 1.0, 1.1, 1.2])
-print(f"  Applying time-aware scaling: {time_weights.tolist()}")
-for j in range(4):
-    pred_matrix[:, j] = pred_matrix[:, j] * time_weights[j]
-
-# FIX #10: Power transform for better probability spread
-print(f"  Applying power transform (pred ** 0.95)")
-pred_matrix = np.clip(pred_matrix, 1e-9, 1.0)  # safety before power
-pred_matrix = pred_matrix ** 0.95
-
-# FIX #11: Monotonicity enforcement (isotonic)
+# Count violations before fix
 violations_before = 0
 for i in range(len(pred_matrix)):
     for j in range(3):
@@ -549,31 +533,19 @@ for i in range(len(pred_matrix)):
 
 print(f"  Monotonicity violations before fix: {violations_before}")
 
+# Isotonic regression — the only principled monotonicity enforcement
 for i in range(len(pred_matrix)):
     row = pred_matrix[i]
     if not all(row[j] <= row[j+1] for j in range(3)):
         ir = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True)
         pred_matrix[i] = ir.fit_transform(np.array(time_horizons, dtype=float), row)
 
-# FIX #8: Fix flat predictions (enforce min increase of 0.01)
-flat_before = 0
-for i in range(len(pred_matrix)):
-    if pred_matrix[i, 0] == pred_matrix[i, 1] == pred_matrix[i, 2] == pred_matrix[i, 3]:
-        flat_before += 1
-
-print(f"  Flat predictions before fix: {flat_before}")
-
-for i in range(len(pred_matrix)):
-    for j in range(1, 4):
-        if pred_matrix[i, j] < pred_matrix[i, j-1] + 0.01:
-            pred_matrix[i, j] = pred_matrix[i, j-1] + 0.01
-
-flat_after = 0
-for i in range(len(pred_matrix)):
-    if pred_matrix[i, 0] == pred_matrix[i, 1] == pred_matrix[i, 2] == pred_matrix[i, 3]:
-        flat_after += 1
-
-print(f"  Flat predictions after fix: {flat_after}")
+violations_after = sum(
+    1 for i in range(len(pred_matrix))
+    for j in range(3)
+    if pred_matrix[i, j] > pred_matrix[i, j+1]
+)
+print(f"  Monotonicity violations after fix: {violations_after}")
 
 # ============================================================
 # PHASE 9 — SAFETY (FIX #12)
@@ -691,24 +663,17 @@ for j, t in enumerate(time_horizons):
     col = pred_matrix[:, j]
     print(f"  prob_{t}h: mean={col.mean():.4f}, std={col.std():.4f}")
 
-print("\n--- Flat Prediction Summary ---")
-print(f"  Before fix: {flat_before}")
-print(f"  After fix:  {flat_after}")
-
-print("\n--- Fixes Applied ---")
+print("\n--- Fixes Applied (v4.0 Clean) ---")
 print("  [1] Progressive survival masking (no naive fallback)")
-print("  [2] Ranking features (rank_dist, rank_speed)")
-print("  [3] Feature stability selection")
-print("  [4] LightGBM: num_leaves=10, max_depth=3, min_child_samples=25")
-print("  [5] Ensemble OOF validation (AUC + Brier)")
-print("  [6] Reduced shrinkage (0.95/0.05)")
-print("  [7] Time-aware scaling [0.9, 1.0, 1.1, 1.2]")
-print("  [8] Power transform (pred ** 0.95)")
-print("  [9] Flat prediction fix (min increase 0.01)")
-print("  [10] Final monotonicity enforcement")
-print("  [11] Safety clip [0.02, 0.98]")
-print("  [12] Comprehensive validation report")
+print("  [2] Feature stability selection (drop zero-importance)")
+print("  [3] LightGBM: num_leaves=10, max_depth=3, min_child_samples=25")
+print("  [4] Ensemble OOF validation (AUC + Brier)")
+print("  [5] Reduced shrinkage (0.95/0.05)")
+print("  [6] Isotonic monotonicity enforcement")
+print("  [7] Safety clip [0.02, 0.98]")
+print("  REMOVED: ranking features, time scaling, power transform, flat fix")
 
 print("\n" + "=" * 70)
-print("PIPELINE v3.0 COMPLETE")
+print("PIPELINE v4.0 COMPLETE")
 print("=" * 70)
+
