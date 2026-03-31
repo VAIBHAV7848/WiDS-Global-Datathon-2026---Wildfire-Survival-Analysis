@@ -509,7 +509,7 @@ for horizon in time_horizons:
         avg_oof[(mn, horizon)] = oof_all.mean(axis=0)
         avg_test[(mn, horizon)] = test_all.mean(axis=0)
 
-# Platt calibration on seed-averaged OOF
+# TWEAK #2: Fold-wise Platt calibration (removes subtle OOF leakage)
 calibrated_oof = {}
 calibrated_test = {}
 
@@ -522,12 +522,18 @@ for horizon in time_horizons:
         oof = avg_oof[(mn, horizon)]
         tp = avg_test[(mn, horizon)]
         
-        # Platt scaling
-        cal = LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000)
-        cal.fit(oof.reshape(-1, 1), y)
+        # Fold-wise calibration: no leakage
+        cal_oof = np.zeros_like(oof)
+        cal_test_folds = np.zeros((N_SPLITS, len(tp)))
+        skf_cal = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=42)
         
-        cal_oof = cal.predict_proba(oof.reshape(-1, 1))[:, 1]
-        cal_test = cal.predict_proba(tp.reshape(-1, 1))[:, 1]
+        for fi, (tr_idx, val_idx) in enumerate(skf_cal.split(oof, y)):
+            cal = LogisticRegression(C=1.0, solver='lbfgs', max_iter=2000)
+            cal.fit(oof[tr_idx].reshape(-1, 1), y[tr_idx])
+            cal_oof[val_idx] = cal.predict_proba(oof[val_idx].reshape(-1, 1))[:, 1]
+            cal_test_folds[fi] = cal.predict_proba(tp.reshape(-1, 1))[:, 1]
+        
+        cal_test = cal_test_folds.mean(axis=0)
         
         calibrated_oof[(mn, horizon)] = cal_oof
         calibrated_test[(mn, horizon)] = cal_test
@@ -535,7 +541,7 @@ for horizon in time_horizons:
         b_before = brier_score_loss(y, oof)
         b_after = brier_score_loss(y, cal_oof)
         improvement = "↓" if b_after < b_before else "↑"
-        print(f"  {mn:8s} @ {horizon}h: Brier {b_before:.4f} → {b_after:.4f} {improvement}")
+        print(f"  {mn:8s} @ {horizon}h: Brier {b_before:.4f} → {b_after:.4f} {improvement} [fold-wise]")
 
 # ============================================================
 # PHASE 7 — ENSEMBLE + DISTRIBUTION ALIGNMENT
@@ -603,12 +609,24 @@ print("\n" + "=" * 80)
 print("  PHASE 8 — RANK TRANSFORMATION (C-INDEX BOOST)")
 print("=" * 80)
 
+# TWEAK #4: Sharpened ranks for better C-index separation
+def sharpen_ranks(pred, power=1.2):
+    ranks = rankdata(pred) / len(pred)
+    return np.power(ranks, power)  # amplify separation
+
 rank_test = {}
+rank_oof = {}
 for horizon in time_horizons:
     raw = ensemble_test[horizon]
-    ranked = rankdata(raw) / len(raw)
+    ranked = sharpen_ranks(raw)
     rank_test[horizon] = ranked
-    print(f"  {horizon}h: rank_preds mean={ranked.mean():.4f}, std={ranked.std():.4f}")
+    
+    # Also compute OOF ranks for adaptive blend tuning
+    _, y, _ = horizon_data[horizon]
+    oof_raw = ensemble_oof[horizon]
+    rank_oof[horizon] = sharpen_ranks(oof_raw)
+    
+    print(f"  {horizon}h: sharpened_ranks mean={ranked.mean():.4f}, std={ranked.std():.4f}")
 
 # ============================================================
 # PHASE 9 — HYBRID BLENDING
@@ -617,29 +635,50 @@ print("\n" + "=" * 80)
 print("  PHASE 9 — HYBRID BLENDING")
 print("=" * 80)
 
-# Horizon-specific blend: more ranking for 12h (C-index), safer for 72h (avoid fake 1.0 AUC)
-BLEND_CONFIG = {
-    12: (0.60, 0.40),  # aggressive ranking — 12h has most separable ranking signal
-    24: (0.70, 0.30),  # balanced
-    48: (0.75, 0.25),  # balanced
-    72: (0.85, 0.15),  # safer — 72h has perfect AUC, don't over-rank
-}
+# TWEAK #1: Adaptive OOF-tuned blend (finds optimal alpha per horizon)
+def find_best_blend(oof_cal, oof_rank, y):
+    best_alpha = 0.70
+    best_score = 1e9
+    for alpha in np.linspace(0.50, 0.95, 20):
+        pred = alpha * oof_cal + (1 - alpha) * oof_rank
+        pred = np.clip(pred, 0.001, 0.999)
+        brier = brier_score_loss(y, pred)
+        if brier < best_score:
+            best_score = brier
+            best_alpha = alpha
+    return best_alpha, best_score
+
+# TWEAK #3: Selective power (only high-confidence predictions)
+def selective_power(pred, power=0.97, threshold=0.6):
+    out = pred.copy()
+    mask = out > threshold
+    out[mask] = out[mask] ** power
+    return out
 
 hybrid_test = {}
+optimal_blends = {}
+
 for horizon in time_horizons:
-    cal_w, rank_w = BLEND_CONFIG[horizon]
+    _, y, _ = horizon_data[horizon]
     cal_prob = ensemble_test[horizon]
     rank_prob = rank_test[horizon]
     
-    hybrid = cal_w * cal_prob + rank_w * rank_prob
+    # Find optimal blend using OOF
+    oof_cal = ensemble_oof[horizon]
+    oof_rk = rank_oof[horizon]
+    best_alpha, best_brier = find_best_blend(oof_cal, oof_rk, y)
+    optimal_blends[horizon] = best_alpha
     
-    # Distribution stretch — slight variance boost
+    # Apply optimal blend to test
+    hybrid = best_alpha * cal_prob + (1 - best_alpha) * rank_prob
     hybrid = np.clip(hybrid, 0.01, 0.99)
-    hybrid = hybrid ** 0.97  # tiny power transform stretches toward extremes
+    
+    # Selective power: only stretch confident predictions
+    hybrid = selective_power(hybrid, power=0.97, threshold=0.5)
     
     hybrid_test[horizon] = hybrid
     
-    print(f"  {horizon}h: cal={cal_w:.2f}/rank={rank_w:.2f}, "
+    print(f"  {horizon}h: optimal_alpha={best_alpha:.3f} (OOF Brier={best_brier:.4f}), "
           f"mean={hybrid.mean():.4f}, std={hybrid.std():.4f}")
 
 # ============================================================
@@ -757,11 +796,11 @@ print("\n" + "=" * 80)
 print("  PHASE 12 — MULTI-SUBMISSION STRATEGY")
 print("=" * 80)
 
-# 3-submission strategy: balanced → rank-heavy → power-stretched
+# 3-submission strategy with different risk profiles
 submission_configs = {
-    'A': {'power': 0.97, 'clip_low': 0.02, 'clip_high': 0.98, 'desc': 'BALANCED (horizon-specific blend)'},
-    'B': {'power': 0.95, 'clip_low': 0.01, 'clip_high': 0.99, 'desc': 'AGGRESSIVE (more stretch)'},
-    'C': {'power': 1.00, 'clip_low': 0.03, 'clip_high': 0.97, 'desc': 'CONSERVATIVE (no stretch)'},
+    'A': {'extra_power': None, 'clip_low': 0.02, 'clip_high': 0.98, 'desc': 'BALANCED (adaptive blend + selective power)'},
+    'B': {'extra_power': 0.95, 'clip_low': 0.01, 'clip_high': 0.99, 'desc': 'AGGRESSIVE (extra stretch)'},
+    'C': {'extra_power': None, 'clip_low': 0.03, 'clip_high': 0.97, 'desc': 'CONSERVATIVE (tighter clip)'},
 }
 
 submissions = {}
@@ -769,15 +808,12 @@ submissions = {}
 for variant, config in submission_configs.items():
     print(f"\n  ─── Submission {variant}: {config['desc']} ───")
     
-    # Build variant from base hybrid_test with variant-specific power
     variant_preds = {}
     for horizon in time_horizons:
         v = hybrid_test[horizon].copy()
-        if config['power'] != 0.97:  # hybrid_test already has 0.97 baked in
-            # Undo the base power and apply variant power
-            v = v ** (1.0 / 0.97)  # undo
+        if config['extra_power'] is not None:
             v = np.clip(v, 0.001, 0.999)
-            v = v ** config['power']  # apply variant power
+            v = v ** config['extra_power']
         variant_preds[horizon] = v
     
     pred_matrix = np.column_stack([variant_preds[t] for t in time_horizons])
