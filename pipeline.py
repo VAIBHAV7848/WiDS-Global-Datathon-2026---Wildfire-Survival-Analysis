@@ -1,11 +1,25 @@
 """
-WiDS Global Datathon 2026 — Competition Pipeline
+WiDS Global Datathon 2026 — Competition Pipeline v3.0
 ==================================================
 Right-censored survival analysis: predict wildfire hit probabilities at 12h, 24h, 48h, 72h.
 Evaluation: Hybrid Score = 0.3 * C-index + 0.7 * (1 - Weighted Brier Score)
 Weighted Brier = 0.3*Brier@24h + 0.4*Brier@48h + 0.3*Brier@72h
 
 Critical: prob_12h NOT in Brier but MUST be monotonic.
+
+v3.0 Fixes:
+  1.  Progressive survival masking (no naive fallback)
+  2.  Ranking features for C-index boost
+  3.  Feature stability selection (drop zero-importance)
+  4.  LightGBM: num_leaves=10, max_depth=3, min_child_samples=25
+  5.  Ensemble OOF validation with AUC + Brier
+  6.  Reduced shrinkage (0.95/0.05)
+  7.  Time-aware scaling [0.9, 1.0, 1.1, 1.2]
+  8.  Power transform (pred ** 0.95)
+  9.  Flat prediction fix (min increase 0.01)
+  10. Final monotonicity enforcement
+  11. Safety clip [0.02, 0.98]
+  12. Comprehensive validation report
 """
 
 import numpy as np
@@ -18,7 +32,6 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.isotonic import IsotonicRegression
-from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import roc_auc_score, brier_score_loss
 import lightgbm as lgb
 
@@ -37,125 +50,86 @@ print(f"Train shape: {train.shape}")
 print(f"Test shape: {test.shape}")
 print(f"Sample submission shape: {sample_sub.shape}")
 
-# Target columns
 print(f"\nTarget distribution:")
 print(f"  event=1 (hit): {(train['event'] == 1).sum()}")
 print(f"  event=0 (censored): {(train['event'] == 0).sum()}")
 print(f"  Hit rate: {train['event'].mean():.4f}")
 
-# Time distribution for hits
 hits = train[train['event'] == 1]
 print(f"\nTime distribution for hits (event=1):")
 print(f"  Mean: {hits['time_to_hit_hours'].mean():.2f}h")
 print(f"  Median: {hits['time_to_hit_hours'].median():.2f}h")
-print(f"  Std: {hits['time_to_hit_hours'].std():.2f}h")
-print(f"  Min: {hits['time_to_hit_hours'].min():.2f}h")
 print(f"  Max: {hits['time_to_hit_hours'].max():.2f}h")
 
-# Hits by time threshold
 for t in [12, 24, 48, 72]:
     n = ((train['event'] == 1) & (train['time_to_hit_hours'] <= t)).sum()
     print(f"  Hits <= {t}h: {n} ({n/len(train)*100:.1f}%)")
 
-# Feature columns
+censored = train[train['event'] == 0]
+print(f"\nCensoring time distribution (event=0):")
+print(f"  Mean: {censored['time_to_hit_hours'].mean():.2f}h, Max: {censored['time_to_hit_hours'].max():.2f}h")
+for t in [12, 24, 48, 72]:
+    n = (censored['time_to_hit_hours'] >= t).sum()
+    print(f"  Observed >= {t}h: {n}/{len(censored)}")
+
 id_col = 'event_id'
 target_cols = ['time_to_hit_hours', 'event']
 feature_cols = [c for c in train.columns if c not in [id_col] + target_cols]
-print(f"\nNumber of raw features: {len(feature_cols)}")
-
-# Basic statistics
-print("\n--- Feature Statistics ---")
-desc = train[feature_cols].describe().T
-print(desc[['mean', 'std', 'min', 'max']].to_string())
-
-# Check for zero-variance features
-zero_var = train[feature_cols].std() == 0
-if zero_var.any():
-    print(f"\nZero-variance features: {list(zero_var[zero_var].index)}")
+print(f"\nRaw features: {len(feature_cols)}")
 
 # ============================================================
-# PHASE 2 — FEATURE ENGINEERING (Physics-first)
+# PHASE 2 — FEATURE ENGINEERING (Physics-first + Ranking)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 2 — FEATURE ENGINEERING (Physics-first)")
+print("PHASE 2 — FEATURE ENGINEERING (Physics-first + Ranking)")
 print("=" * 70)
 
 def engineer_features(df):
-    """Create physics-grounded features."""
+    """Create physics-grounded + ranking features."""
     out = df.copy()
     
-    # 1. Log distance to evac zone (key predictor)
+    # Physics features
     out['log_dist_min'] = np.log1p(df['dist_min_ci_0_5h'])
     
-    # 2. Projected time to hit: distance / closing speed
     out['time_to_hit_projected'] = df['dist_min_ci_0_5h'] / (df['closing_speed_m_per_h'].clip(lower=0) + 1e-9)
-    # Cap at reasonable range
     out['time_to_hit_projected'] = out['time_to_hit_projected'].clip(upper=500)
     
-    # 3. Directional threat score: closing speed * alignment
     out['directional_threat'] = df['closing_speed_m_per_h'] * df['alignment_abs']
-    
-    # 4. Growth-weighted threat: area growth rate * alignment
     out['growth_threat'] = df['area_growth_rate_ha_per_h'] * df['alignment_abs']
-    
-    # 5. Rate of distance change normalized
     out['dist_change_rate'] = df['dist_change_ci_0_5h'] / (df['dt_first_last_0_5h'] + 1e-9)
-    
-    # 6. Fire intensity signal: log area * relative growth
     out['fire_intensity'] = df['log1p_area_first'] * df['relative_growth_0_5h']
-    
-    # 7. Closing velocity (positive = approaching)
     out['closing_velocity'] = df['closing_speed_m_per_h'].clip(lower=0)
     
-    # 8. Distance-weighted closing speed (closer + faster = more dangerous)
     out['proximity_threat'] = df['closing_speed_m_per_h'] / (df['dist_min_ci_0_5h'] + 1e-3)
     out['proximity_threat'] = out['proximity_threat'].clip(-1, 1)
     
-    # 9. Is fire close? (within 5km)
     out['is_close'] = (df['dist_min_ci_0_5h'] < 5000).astype(float)
-    
-    # 10. Along-track speed (how fast fire moves TOWARD evac zone)
     out['along_track_abs'] = df['along_track_speed'].abs()
+    
+    # FIX #6: Ranking features for C-index boost
+    out['rank_dist'] = out['dist_min_ci_0_5h'].rank(pct=True)
+    out['rank_speed'] = out['closing_speed_m_per_h'].rank(pct=True)
     
     return out
 
 train_fe = engineer_features(train)
 test_fe = engineer_features(test)
 
-# Define final feature set
 base_features = [
-    'dist_min_ci_0_5h',
-    'closing_speed_m_per_h',
-    'alignment_abs',
-    'area_growth_rate_ha_per_h',
-    'log1p_area_first',
-    'relative_growth_0_5h',
-    'centroid_speed_m_per_h',
-    'radial_growth_rate_m_per_h',
-    'dist_change_ci_0_5h',
-    'dist_slope_ci_0_5h',
-    'projected_advance_m',
-    'along_track_speed',
-    'num_perimeters_0_5h',
-    'dt_first_last_0_5h',
-    'low_temporal_resolution_0_5h',
-    'closing_speed_abs_m_per_h',
-    'dist_std_ci_0_5h',
-    'dist_fit_r2_0_5h',
-    'area_first_ha',
+    'dist_min_ci_0_5h', 'closing_speed_m_per_h', 'alignment_abs',
+    'area_growth_rate_ha_per_h', 'log1p_area_first', 'relative_growth_0_5h',
+    'centroid_speed_m_per_h', 'radial_growth_rate_m_per_h',
+    'dist_change_ci_0_5h', 'dist_slope_ci_0_5h', 'projected_advance_m',
+    'along_track_speed', 'num_perimeters_0_5h', 'dt_first_last_0_5h',
+    'low_temporal_resolution_0_5h', 'closing_speed_abs_m_per_h',
+    'dist_std_ci_0_5h', 'dist_fit_r2_0_5h', 'area_first_ha',
 ]
 
 engineered_features = [
-    'log_dist_min',
-    'time_to_hit_projected',
-    'directional_threat',
-    'growth_threat',
-    'dist_change_rate',
-    'fire_intensity',
-    'closing_velocity',
-    'proximity_threat',
-    'is_close',
-    'along_track_abs',
+    'log_dist_min', 'time_to_hit_projected', 'directional_threat',
+    'growth_threat', 'dist_change_rate', 'fire_intensity',
+    'closing_velocity', 'proximity_threat', 'is_close', 'along_track_abs',
+    'rank_dist', 'rank_speed',  # FIX #6: ranking features
 ]
 
 all_features = base_features + engineered_features
@@ -174,7 +148,6 @@ to_drop = set()
 for col in upper.columns:
     high_corr = upper.index[upper[col] > 0.97].tolist()
     if high_corr:
-        # Keep the one with higher correlation to event
         for hc in high_corr:
             corr_event_col = abs(train_fe[col].corr(train_fe['event']))
             corr_event_hc = abs(train_fe[hc].corr(train_fe['event']))
@@ -187,8 +160,7 @@ if to_drop:
     print(f"Dropping highly correlated features: {to_drop}")
     all_features = [f for f in all_features if f not in to_drop]
 
-print(f"\nFinal feature count: {len(all_features)}")
-print(f"Features: {all_features}")
+print(f"\nFeature count after correlation filter: {len(all_features)}")
 assert len(all_features) <= 30, f"GATE FAIL: {len(all_features)} features exceeds 30 limit"
 
 # Outlier capping at 1st/99th percentile
@@ -197,313 +169,385 @@ for col in all_features:
     train_fe[col] = train_fe[col].clip(p1, p99)
     test_fe[col] = test_fe[col].clip(p1, p99)
 
-X_train = train_fe[all_features].values
+X_train_full = train_fe[all_features].values
 X_test = test_fe[all_features].values
-
-# Fill any NaN (should not happen but safety)
-X_train = np.nan_to_num(X_train, nan=0.0)
+X_train_full = np.nan_to_num(X_train_full, nan=0.0)
 X_test = np.nan_to_num(X_test, nan=0.0)
 
 # ============================================================
-# PHASE 3 — TARGET CONSTRUCTION (Survival-Aware Adaptive)
+# PHASE 2.5 — FEATURE STABILITY SELECTION (FIX #5)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 3 — TARGET CONSTRUCTION (Survival-Aware Adaptive)")
+print("PHASE 2.5 — FEATURE STABILITY SELECTION")
+print("=" * 70)
+
+# Quick LGBM scan on 12h (most samples) to find zero-importance features
+y_scan = ((train['event'] == 1) & (train['time_to_hit_hours'] <= 12)).astype(int).values
+skf_scan = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+fold_importances = []
+
+for tr_idx, val_idx in skf_scan.split(X_train_full, y_scan):
+    m = lgb.LGBMClassifier(num_leaves=10, max_depth=3, n_estimators=100,
+                            learning_rate=0.05, verbosity=-1, random_state=42)
+    m.fit(X_train_full[tr_idx], y_scan[tr_idx])
+    fold_importances.append(m.feature_importances_)
+
+imp_matrix = np.array(fold_importances)
+imp_mean = imp_matrix.mean(axis=0)
+imp_std = imp_matrix.std(axis=0)
+
+# Drop features with zero mean importance across all folds
+zero_imp_mask = imp_mean == 0
+zero_imp_features = [all_features[i] for i in range(len(all_features)) if zero_imp_mask[i]]
+
+if zero_imp_features:
+    print(f"Dropping zero-importance features: {zero_imp_features}")
+    stable_features = [f for f in all_features if f not in zero_imp_features]
+else:
+    stable_features = all_features.copy()
+    print("All features have non-zero importance.")
+
+# Report stability
+print(f"\nFeature stability report:")
+for i, f in enumerate(all_features):
+    cv = imp_std[i] / (imp_mean[i] + 1e-9)
+    tag = "STABLE" if cv < 1.0 else "VARIABLE"
+    kept = "KEPT" if f in stable_features else "DROPPED"
+    print(f"  {f:30s}: mean_imp={imp_mean[i]:8.1f}, CV={cv:.2f} [{tag}] [{kept}]")
+
+all_features = stable_features
+X_train_full = train_fe[all_features].values
+X_test = test_fe[all_features].values
+X_train_full = np.nan_to_num(X_train_full, nan=0.0)
+X_test = np.nan_to_num(X_test, nan=0.0)
+
+print(f"\nFinal stable feature count: {len(all_features)}")
+
+# ============================================================
+# PHASE 3 — TARGET CONSTRUCTION (Progressive Survival Masking)
+# FIX #1 + #2: No naive fallback. Progressive relaxation only.
+# ============================================================
+print("\n" + "=" * 70)
+print("PHASE 3 — TARGET CONSTRUCTION (Progressive Survival Masking)")
 print("=" * 70)
 
 time_horizons = [12, 24, 48, 72]
-horizon_data = {} 
+horizon_data = {}       # (X_masked, y_masked, indices_masked)
+MIN_NEGATIVES = 5
 
 for horizon in time_horizons:
-    y_labels = []
-    indices = []
+    # Try progressively relaxed observation thresholds
+    relax_factors = [1.0, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70, 0.60, 0.50]
+    selected = None
     
-    # PASS 1: Attempt survival-aware masking
-    for idx, row in train.iterrows():
-        is_hit = row['event'] == 1
-        time = row['time_to_hit_hours']
-        
-        if is_hit:
-            y_labels.append(1 if time <= horizon else 0)
-            indices.append(idx)
-        else: # Censored
-            if time >= horizon:
-                y_labels.append(0)
-                indices.append(idx)
-            else:
-                # Censored BEFORE horizon: outcome is technically UNKNOWN
-                pass
-                
-    # If we have too few negatives (e.g. < 20), the strict mask is too aggressive.
-    # Revert to a "conservative" approach for this horizon.
-    if np.sum(np.array(y_labels) == 0) < 20:
-        print(f"  horizon {horizon}h: Survival mask too aggressive (<20 negatives). Reverting to full-data labeling.")
+    for relax in relax_factors:
+        obs_threshold = horizon * relax
         y_labels = []
         indices = []
+        
         for idx, row in train.iterrows():
             is_hit = row['event'] == 1
-            time = row['time_to_hit_hours']
-            if is_hit:
-                y_labels.append(1 if time <= horizon else 0)
-            else:
-                y_labels.append(0) # Assume censored = no hit
-            indices.append(idx)
+            t = row['time_to_hit_hours']
             
-    y_full = np.array(y_labels)
-    X_full = X_train[indices]
-    horizon_data[horizon] = (X_full, y_full)
+            if is_hit:
+                y_labels.append(1 if t <= horizon else 0)
+                indices.append(idx)
+            else:  # Censored
+                if t >= obs_threshold:
+                    # Observed long enough — label as negative
+                    y_labels.append(0)
+                    indices.append(idx)
+                # else: UNKNOWN, exclude
+        
+        n_neg = sum(1 for y in y_labels if y == 0)
+        n_pos = sum(1 for y in y_labels if y == 1)
+        
+        if n_neg >= MIN_NEGATIVES and n_pos >= MIN_NEGATIVES:
+            selected = (y_labels, indices, obs_threshold, relax)
+            break
     
-    print(f"  hit_{horizon}h: {y_full.sum()}/{len(y_full)} samples used ({len(y_full)/len(train)*100:.1f}% of data)")
+    if selected is None:
+        # This should not happen with the fine-grained relaxation above
+        print(f"  CRITICAL WARNING [{horizon}h]: Cannot build valid training set!")
+        # Use the last attempt (most relaxed)
+        selected = (y_labels, indices, obs_threshold, relax)
+    
+    y_labels, indices, obs_threshold, relax = selected
+    y_arr = np.array(y_labels)
+    X_arr = X_train_full[indices]
+    horizon_data[horizon] = (X_arr, y_arr, indices)
+    
+    mask_type = "STRICT" if relax == 1.0 else f"RELAXED ({relax:.0%}, obs>={obs_threshold:.0f}h)"
+    n_pos = y_arr.sum()
+    n_neg = len(y_arr) - n_pos
+    print(f"  {horizon}h: {n_pos} pos + {n_neg} neg = {len(y_arr)} total [{mask_type}]")
 
 # ============================================================
-# PHASE 4 — MODELLING (Simplified for Generalization)
+# PHASE 4 — MODELLING (FIX #4: Updated hyperparameters)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 4 — MODELLING (Simplified for Generalization)")
+print("PHASE 4 — MODELLING")
 print("=" * 70)
 
 N_SPLITS = 5
 RANDOM_STATE = 42
+model_names = ['lgbm', 'logreg', 'rf']
 
 oof_preds = {}
 test_preds = {}
 model_metrics = {}
 
 for horizon in time_horizons:
-    X_h, y = horizon_data[horizon]
-    print(f"\n--- Training for {horizon}h horizon ({len(y)} samples) ---")
+    X_h, y, mask_indices = horizon_data[horizon]
+    print(f"\n--- {horizon}h horizon ({len(y)} samples, {y.sum()} pos) ---")
     
     skf = StratifiedKFold(n_splits=N_SPLITS, shuffle=True, random_state=RANDOM_STATE)
     
-    # ---- MODEL 1: LightGBM (Very Simple) ----
-    model_name = 'lgbm'
+    # ---- MODEL 1: LightGBM (FIX #4) ----
+    mn = 'lgbm'
     oof = np.zeros(len(y))
-    test_fold_preds = np.zeros((N_SPLITS, len(X_test)))
+    test_fp = np.zeros((N_SPLITS, len(X_test)))
     fold_aucs = []
     
-    for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_h, y)):
+    for fi, (tr_idx, val_idx) in enumerate(skf.split(X_h, y)):
         X_tr, X_val = X_h[tr_idx], X_h[val_idx]
         y_tr, y_val = y[tr_idx], y[val_idx]
         
-        neg_count = (y_tr == 0).sum()
-        pos_count = (y_tr == 1).sum()
-        spw = neg_count / (pos_count + 1e-9)
+        neg_c = (y_tr == 0).sum()
+        pos_c = (y_tr == 1).sum()
+        spw = max(neg_c / (pos_c + 1e-9), 0.1)
         
-        # Simplified parameters to stop AUC 1.0 overfitting
         params = {
-            'objective': 'binary',
-            'metric': 'binary_logloss',
-            'num_leaves': 5,
-            'max_depth': 2,
-            'min_child_samples': 30,
-            'reg_alpha': 0.5,
-            'reg_lambda': 2.0,
-            'learning_rate': 0.03,
-            'n_estimators': 300,
+            'objective': 'binary', 'metric': 'binary_logloss',
+            'num_leaves': 10, 'max_depth': 3,           # FIX #4
+            'min_child_samples': 25,                     # FIX #4
+            'reg_alpha': 0.5, 'reg_lambda': 2.0,
+            'learning_rate': 0.03, 'n_estimators': 300,
             'scale_pos_weight': spw,
-            'verbosity': -1,
-            'random_state': RANDOM_STATE,
-            'subsample': 0.7,
-            'colsample_bytree': 0.7,
+            'verbosity': -1, 'random_state': RANDOM_STATE,
+            'subsample': 0.7, 'colsample_bytree': 0.7,
         }
         
-        model = lgb.LGBMClassifier(**params)
-        model.fit(
-            X_tr, y_tr,
-            eval_set=[(X_val, y_val)],
-            callbacks=[lgb.early_stopping(stopping_rounds=20, verbose=False)]
-        )
+        mdl = lgb.LGBMClassifier(**params)
+        mdl.fit(X_tr, y_tr, eval_set=[(X_val, y_val)],
+                callbacks=[lgb.early_stopping(stopping_rounds=20, verbose=False)])
         
-        val_pred = model.predict_proba(X_val)[:, 1]
-        oof[val_idx] = val_pred
-        test_fold_preds[fold_idx] = model.predict_proba(X_test)[:, 1]
-        
-        auc = roc_auc_score(y_val, val_pred) if len(np.unique(y_val)) > 1 else 0.5
-        fold_aucs.append(auc)
+        vp = mdl.predict_proba(X_val)[:, 1]
+        oof[val_idx] = vp
+        test_fp[fi] = mdl.predict_proba(X_test)[:, 1]
+        fold_aucs.append(roc_auc_score(y_val, vp) if len(np.unique(y_val)) > 1 else 0.5)
     
-    oof_preds[(model_name, horizon)] = oof
-    test_preds[(model_name, horizon)] = test_fold_preds.mean(axis=0)
-    overall_auc = roc_auc_score(y, oof)
-    fold_std = np.std(fold_aucs)
-    model_metrics[(model_name, horizon)] = {'auc': overall_auc, 'fold_std': fold_std}
-    print(f"    LightGBM: OOF AUC={overall_auc:.4f}, Fold STD={fold_std:.4f}")
+    oof_preds[(mn, horizon)] = oof
+    test_preds[(mn, horizon)] = test_fp.mean(axis=0)
+    oa = roc_auc_score(y, oof) if len(np.unique(y)) > 1 else 0.5
+    fs = np.std(fold_aucs)
+    model_metrics[(mn, horizon)] = {'auc': oa, 'fold_std': fs}
+    print(f"    LightGBM: AUC={oa:.4f}, STD={fs:.4f}")
     
     # ---- MODEL 2: Logistic Regression ----
-    model_name = 'logreg'
+    mn = 'logreg'
     oof = np.zeros(len(y))
-    test_fold_preds = np.zeros((N_SPLITS, len(X_test)))
+    test_fp = np.zeros((N_SPLITS, len(X_test)))
     fold_aucs = []
     
     scaler = StandardScaler()
-    X_h_scaled = scaler.fit_transform(X_h)
-    X_test_scaled = scaler.transform(X_test)
+    X_h_sc = scaler.fit_transform(X_h)
+    X_test_sc = scaler.transform(X_test)
     
-    for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_h_scaled, y)):
-        X_tr, X_val = X_h_scaled[tr_idx], X_h_scaled[val_idx]
+    for fi, (tr_idx, val_idx) in enumerate(skf.split(X_h_sc, y)):
+        X_tr, X_val = X_h_sc[tr_idx], X_h_sc[val_idx]
         y_tr, y_val = y[tr_idx], y[val_idx]
         
-        model = LogisticRegression(
-            C=0.05, solver='lbfgs', max_iter=1000,
-            class_weight='balanced', random_state=RANDOM_STATE
-        )
-        model.fit(X_tr, y_tr)
+        mdl = LogisticRegression(C=0.05, solver='lbfgs', max_iter=1000,
+                                  class_weight='balanced', random_state=RANDOM_STATE)
+        mdl.fit(X_tr, y_tr)
         
-        val_pred = model.predict_proba(X_val)[:, 1]
-        oof[val_idx] = val_pred
-        test_fold_preds[fold_idx] = model.predict_proba(X_test_scaled)[:, 1]
-        
-        auc = roc_auc_score(y_val, val_pred)
-        fold_aucs.append(auc)
+        vp = mdl.predict_proba(X_val)[:, 1]
+        oof[val_idx] = vp
+        test_fp[fi] = mdl.predict_proba(X_test_sc)[:, 1]
+        fold_aucs.append(roc_auc_score(y_val, vp) if len(np.unique(y_val)) > 1 else 0.5)
     
-    oof_preds[(model_name, horizon)] = oof
-    test_preds[(model_name, horizon)] = test_fold_preds.mean(axis=0)
-    overall_auc = roc_auc_score(y, oof)
-    fold_std = np.std(fold_aucs)
-    model_metrics[(model_name, horizon)] = {'auc': overall_auc, 'fold_std': fold_std}
-    print(f"    LogReg:   OOF AUC={overall_auc:.4f}, Fold STD={fold_std:.4f}")
+    oof_preds[(mn, horizon)] = oof
+    test_preds[(mn, horizon)] = test_fp.mean(axis=0)
+    oa = roc_auc_score(y, oof) if len(np.unique(y)) > 1 else 0.5
+    fs = np.std(fold_aucs)
+    model_metrics[(mn, horizon)] = {'auc': oa, 'fold_std': fs}
+    print(f"    LogReg:   AUC={oa:.4f}, STD={fs:.4f}")
     
     # ---- MODEL 3: Random Forest ----
-    model_name = 'rf'
+    mn = 'rf'
     oof = np.zeros(len(y))
-    test_fold_preds = np.zeros((N_SPLITS, len(X_test)))
+    test_fp = np.zeros((N_SPLITS, len(X_test)))
     fold_aucs = []
     
-    for fold_idx, (tr_idx, val_idx) in enumerate(skf.split(X_h, y)):
+    for fi, (tr_idx, val_idx) in enumerate(skf.split(X_h, y)):
         X_tr, X_val = X_h[tr_idx], X_h[val_idx]
         y_tr, y_val = y[tr_idx], y[val_idx]
         
-        model = RandomForestClassifier(
+        mdl = RandomForestClassifier(
             n_estimators=300, max_depth=3, min_samples_leaf=15,
             max_features='sqrt', class_weight='balanced',
-            random_state=RANDOM_STATE, n_jobs=-1
-        )
-        model.fit(X_tr, y_tr)
+            random_state=RANDOM_STATE, n_jobs=-1)
+        mdl.fit(X_tr, y_tr)
         
-        val_pred = model.predict_proba(X_val)[:, 1]
-        oof[val_idx] = val_pred
-        test_fold_preds[fold_idx] = model.predict_proba(X_test)[:, 1]
-        
-        auc = roc_auc_score(y_val, val_pred)
-        fold_aucs.append(auc)
+        vp = mdl.predict_proba(X_val)[:, 1]
+        oof[val_idx] = vp
+        test_fp[fi] = mdl.predict_proba(X_test)[:, 1]
+        fold_aucs.append(roc_auc_score(y_val, vp) if len(np.unique(y_val)) > 1 else 0.5)
     
-    oof_preds[(model_name, horizon)] = oof
-    test_preds[(model_name, horizon)] = test_fold_preds.mean(axis=0)
-    overall_auc = roc_auc_score(y, oof)
-    fold_std = np.std(fold_aucs)
-    model_metrics[(model_name, horizon)] = {'auc': overall_auc, 'fold_std': fold_std}
-    print(f"    RF:       OOF AUC={overall_auc:.4f}, Fold STD={fold_std:.4f}")
+    oof_preds[(mn, horizon)] = oof
+    test_preds[(mn, horizon)] = test_fp.mean(axis=0)
+    oa = roc_auc_score(y, oof) if len(np.unique(y)) > 1 else 0.5
+    fs = np.std(fold_aucs)
+    model_metrics[(mn, horizon)] = {'auc': oa, 'fold_std': fs}
+    print(f"    RF:       AUC={oa:.4f}, STD={fs:.4f}")
 
 # ============================================================
-# PHASE 5 — STRICT VALIDATION GATES
+# PHASE 5 — VALIDATION GATES
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 5 — STRICT VALIDATION GATES")
+print("PHASE 5 — VALIDATION GATES")
 print("=" * 70)
 
-model_names = ['lgbm', 'logreg', 'rf']
 valid_models = {}
 
 for horizon in time_horizons:
-    for model_name in model_names:
-        metrics = model_metrics[(model_name, horizon)]
-        auc = metrics['auc']
-        fold_std = metrics['fold_std']
-        
+    for mn in model_names:
+        m = model_metrics[(mn, horizon)]
         passed = True
         reasons = []
         
-        if auc > 0.985: # Slightly more lenient since we are using fewer samples
-            reasons.append(f"AUC={auc:.4f} > 0.985")
-        
-        if fold_std > 0.15:
-            reasons.append(f"fold_std={fold_std:.4f} > 0.15")
+        if m['auc'] > 0.985:
+            reasons.append(f"AUC={m['auc']:.4f}>0.985 (overfit warning)")
+        if m['fold_std'] > 0.15:
+            reasons.append(f"STD={m['fold_std']:.4f}>0.15 (unstable)")
             passed = False
         
-        valid_models[(model_name, horizon)] = passed
-        status = "PASS" if passed else "FAIL"
-        print(f"  [{status}] {model_name} @ {horizon}h: AUC={auc:.4f}, fold_std={fold_std:.4f}")
+        valid_models[(mn, horizon)] = passed
+        tag = "PASS" if passed else "FAIL"
+        print(f"  [{tag}] {mn} @ {horizon}h: AUC={m['auc']:.4f}, STD={m['fold_std']:.4f}")
         for r in reasons:
             print(f"         WARNING: {r}")
 
 # ============================================================
-# PHASE 6 — CALIBRATION
+# PHASE 6 — CALIBRATION (Platt Scaling)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 6 — CALIBRATION (Platt Scaling)")
+print("PHASE 6 — CALIBRATION")
 print("=" * 70)
 
 calibrated_oof = {}
 calibrated_test = {}
 
 for horizon in time_horizons:
-    X_h, y = horizon_data[horizon]
-    for model_name in model_names:
-        if not valid_models[(model_name, horizon)]:
+    _, y, _ = horizon_data[horizon]
+    for mn in model_names:
+        if not valid_models[(mn, horizon)]:
             continue
         
-        oof = oof_preds[(model_name, horizon)]
-        test_pred = test_preds[(model_name, horizon)]
+        oof = oof_preds[(mn, horizon)]
+        tp = test_preds[(mn, horizon)]
         
-        # Platt scaling (Logistic Regression)
-        from sklearn.linear_model import LogisticRegression as Calibrator
-        cal = Calibrator(C=1.0, solver='lbfgs')
+        cal = LogisticRegression(C=1.0, solver='lbfgs', max_iter=1000)
         cal.fit(oof.reshape(-1, 1), y)
         
         cal_oof = cal.predict_proba(oof.reshape(-1, 1))[:, 1]
-        cal_test = cal.predict_proba(test_pred.reshape(-1, 1))[:, 1]
+        cal_test = cal.predict_proba(tp.reshape(-1, 1))[:, 1]
         
-        calibrated_oof[(model_name, horizon)] = cal_oof
-        calibrated_test[(model_name, horizon)] = cal_test
+        calibrated_oof[(mn, horizon)] = cal_oof
+        calibrated_test[(mn, horizon)] = cal_test
         
-        brier_before = brier_score_loss(y, oof)
-        brier_after = brier_score_loss(y, cal_oof)
-        print(f"  {model_name} @ {horizon}h: Brier improved: {brier_before:.4f} -> {brier_after:.4f}")
+        b_before = brier_score_loss(y, oof)
+        b_after = brier_score_loss(y, cal_oof)
+        print(f"  {mn} @ {horizon}h: Brier {b_before:.4f} -> {b_after:.4f}")
 
 # ============================================================
-# PHASE 7 — ENSEMBLE
+# PHASE 7 — ENSEMBLE + OOF VALIDATION (FIX #3 + #7)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 7 — ENSEMBLE (Stability Optimized)")
+print("PHASE 7 — ENSEMBLE + OOF VALIDATION")
 print("=" * 70)
 
 ensemble_test = {}
+ensemble_oof = {}
 
 for horizon in time_horizons:
+    _, y, _ = horizon_data[horizon]
+    
     valid = []
-    for model_name in model_names:
-        if valid_models[(model_name, horizon)]:
-            m = model_metrics[(model_name, horizon)]
-            # Added 1e-3 stabilizer to denominator to prevent explosion
-            weight = m['auc'] * (1.0 / (m['fold_std'] + 1e-3))
-            valid.append((model_name, weight))
+    for mn in model_names:
+        if valid_models[(mn, horizon)] and (mn, horizon) in calibrated_test:
+            m = model_metrics[(mn, horizon)]
+            w = m['auc'] * (1.0 / (m['fold_std'] + 1e-3))  # stabilized weight
+            valid.append((mn, w))
     
     if not valid:
         ensemble_test[horizon] = test_preds[('lgbm', horizon)]
+        ensemble_oof[horizon] = oof_preds[('lgbm', horizon)]
+        print(f"  {horizon}h: No valid models, using raw LGBM")
         continue
     
     total_w = sum(w for _, w in valid)
-    test_ens = np.zeros(len(X_test))
+    t_ens = np.zeros(len(X_test))
+    o_ens = np.zeros(len(y))
     
-    for model_name, w in valid:
-        norm_w = w / total_w
-        test_ens += norm_w * calibrated_test[(model_name, horizon)]
-        print(f"  {horizon}h: {model_name} weight={norm_w:.4f}")
+    for mn, w in valid:
+        nw = w / total_w
+        t_ens += nw * calibrated_test[(mn, horizon)]
+        o_ens += nw * calibrated_oof[(mn, horizon)]
+        print(f"  {horizon}h: {mn} weight={nw:.4f}")
     
-    # ---- EXTRA: SMALLEST SAMPLE SHRINKAGE ----
-    # Shrink predictions slightly toward the global mean to improve Brier score
-    mean_val = test_ens.mean()
-    test_ens = 0.9 * test_ens + 0.1 * mean_val
+    # FIX #7: REDUCED shrinkage (0.95/0.05 instead of 0.9/0.1)
+    test_mean = t_ens.mean()
+    t_ens = 0.95 * t_ens + 0.05 * test_mean
     
-    ensemble_test[horizon] = test_ens
+    ensemble_test[horizon] = t_ens
+    ensemble_oof[horizon] = o_ens
+
+# FIX #3: Ensemble OOF Validation
+print("\n  --- Ensemble OOF Validation ---")
+for horizon in time_horizons:
+    _, y, _ = horizon_data[horizon]
+    oof_e = ensemble_oof[horizon]
+    if len(np.unique(y)) > 1:
+        ens_auc = roc_auc_score(y, oof_e)
+        ens_brier = brier_score_loss(y, oof_e)
+        oof_mean = oof_e.mean()
+        test_mean = ensemble_test[horizon].mean()
+        diff = abs(oof_mean - test_mean)
+        print(f"  {horizon}h: Ens_AUC={ens_auc:.4f}, Ens_Brier={ens_brier:.4f}, "
+              f"OOF_mean={oof_mean:.4f}, TEST_mean={test_mean:.4f}, diff={diff:.4f}")
+    else:
+        print(f"  {horizon}h: Single class — cannot compute AUC")
 
 # ============================================================
-# PHASE 8 — MONOTONICITY ENFORCEMENT
+# PHASE 8 — POST-PROCESSING (FIX #8, #9, #10, #11)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 8 — MONOTONICITY ENFORCEMENT")
+print("PHASE 8 — POST-PROCESSING")
 print("=" * 70)
 
 pred_matrix = np.column_stack([ensemble_test[t] for t in time_horizons])
+
+# FIX #9: Time-aware scaling
+time_weights = np.array([0.9, 1.0, 1.1, 1.2])
+print(f"  Applying time-aware scaling: {time_weights.tolist()}")
+for j in range(4):
+    pred_matrix[:, j] = pred_matrix[:, j] * time_weights[j]
+
+# FIX #10: Power transform for better probability spread
+print(f"  Applying power transform (pred ** 0.95)")
+pred_matrix = np.clip(pred_matrix, 1e-9, 1.0)  # safety before power
+pred_matrix = pred_matrix ** 0.95
+
+# FIX #11: Monotonicity enforcement (isotonic)
+violations_before = 0
+for i in range(len(pred_matrix)):
+    for j in range(3):
+        if pred_matrix[i, j] > pred_matrix[i, j+1]:
+            violations_before += 1
+
+print(f"  Monotonicity violations before fix: {violations_before}")
 
 for i in range(len(pred_matrix)):
     row = pred_matrix[i]
@@ -511,21 +555,63 @@ for i in range(len(pred_matrix)):
         ir = IsotonicRegression(y_min=0.0, y_max=1.0, increasing=True)
         pred_matrix[i] = ir.fit_transform(np.array(time_horizons, dtype=float), row)
 
+# FIX #8: Fix flat predictions (enforce min increase of 0.01)
+flat_before = 0
+for i in range(len(pred_matrix)):
+    if pred_matrix[i, 0] == pred_matrix[i, 1] == pred_matrix[i, 2] == pred_matrix[i, 3]:
+        flat_before += 1
+
+print(f"  Flat predictions before fix: {flat_before}")
+
+for i in range(len(pred_matrix)):
+    for j in range(1, 4):
+        if pred_matrix[i, j] < pred_matrix[i, j-1] + 0.01:
+            pred_matrix[i, j] = pred_matrix[i, j-1] + 0.01
+
+flat_after = 0
+for i in range(len(pred_matrix)):
+    if pred_matrix[i, 0] == pred_matrix[i, 1] == pred_matrix[i, 2] == pred_matrix[i, 3]:
+        flat_after += 1
+
+print(f"  Flat predictions after fix: {flat_after}")
+
 # ============================================================
-# PHASE 9 — PREDICTION SAFETY
+# PHASE 9 — SAFETY (FIX #12)
 # ============================================================
 print("\n" + "=" * 70)
-print("PHASE 9 — PREDICTION SAFETY")
+print("PHASE 9 — SAFETY")
 print("=" * 70)
 
-# Final clip to Avoid 0/1 (bad for LogLoss/Brier if wrong)
-pred_matrix = np.clip(pred_matrix, 0.01, 0.99)
+# FIX #12: Clip to [0.02, 0.98]
+pred_matrix = np.clip(pred_matrix, 0.02, 0.98)
+
+# Re-enforce monotonicity after clipping (clipping can break the min-increase)
+for i in range(len(pred_matrix)):
+    for j in range(1, 4):
+        if pred_matrix[i, j] < pred_matrix[i, j-1]:
+            pred_matrix[i, j] = pred_matrix[i, j-1]
+
+# Final verification
+violations_final = 0
+for i in range(len(pred_matrix)):
+    for j in range(3):
+        if pred_matrix[i, j] > pred_matrix[i, j+1] + 1e-9:
+            violations_final += 1
+
+has_nan = np.isnan(pred_matrix).any()
+has_inf = np.isinf(pred_matrix).any()
+
+print(f"  Final monotonicity violations: {violations_final}")
+print(f"  NaN present: {has_nan}")
+print(f"  Inf present: {has_inf}")
 
 for j, t in enumerate(time_horizons):
-    print(f"  prob_{t}h: mean={pred_matrix[:, j].mean():.4f}, range=[{pred_matrix[:, j].min():.4f}, {pred_matrix[:, j].max():.4f}]")
+    col = pred_matrix[:, j]
+    print(f"  prob_{t}h: mean={col.mean():.4f}, std={col.std():.4f}, "
+          f"min={col.min():.4f}, max={col.max():.4f}")
 
 # ============================================================
-# PHASE 10 — FINAL SUBMISSION
+# PHASE 10 — FINAL SUBMISSION + COMPREHENSIVE REPORT
 # ============================================================
 print("\n" + "=" * 70)
 print("PHASE 10 — FINAL SUBMISSION")
@@ -539,18 +625,90 @@ submission = pd.DataFrame({
     'prob_72h': pred_matrix[:, 3],
 })
 
-submission.to_csv(r'd:\WiDS\submission.csv', index=False)
-print(f"  >>> SUBMISSION SAVED: submission.csv <<<")
+# Verification
+checks = {}
+checks['rows'] = len(submission) == 95
+checks['cols'] = list(submission.columns) == ['event_id', 'prob_12h', 'prob_24h', 'prob_48h', 'prob_72h']
+checks['ids'] = list(submission['event_id']) == list(sample_sub['event_id'])
+checks['no_nan'] = not submission.isnull().any().any()
+checks['no_inf'] = not np.isinf(submission[['prob_12h', 'prob_24h', 'prob_48h', 'prob_72h']].values).any()
 
-# Self-Verification
-missing_in_12 = len(train) - len(horizon_data[12][1])
-missing_in_72 = len(train) - len(horizon_data[72][1])
-print(f"\nCensoring Fix Verification:")
-print(f"  Samples masked at 12h: {missing_in_12}")
-print(f"  Samples masked at 72h: {missing_in_72}")
-print(f"  Monotonicity Guaranteed: YES")
-print(f"  Prediction Shrinkage Applied: YES")
+prob_cols = ['prob_12h', 'prob_24h', 'prob_48h', 'prob_72h']
+checks['range'] = submission[prob_cols].min().min() >= 0.02 - 1e-9 and submission[prob_cols].max().max() <= 0.98 + 1e-9
+
+mono_ok = True
+for _, row in submission.iterrows():
+    if not (row['prob_12h'] <= row['prob_24h'] + 1e-9 and
+            row['prob_24h'] <= row['prob_48h'] + 1e-9 and
+            row['prob_48h'] <= row['prob_72h'] + 1e-9):
+        mono_ok = False
+        break
+checks['monotonicity'] = mono_ok
+
+for name, ok in checks.items():
+    print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
+
+all_passed = all(checks.values())
+
+if all_passed:
+    submission.to_csv(r'd:\WiDS\submission.csv', index=False)
+    print(f"\n  >>> SUBMISSION SAVED: d:\\WiDS\\submission.csv <<<")
+else:
+    print(f"\n  >>> SUBMISSION NOT SAVED — FIX ERRORS <<<")
+
+# ============================================================
+# COMPREHENSIVE VALIDATION REPORT
+# ============================================================
+print("\n" + "=" * 70)
+print("COMPREHENSIVE VALIDATION REPORT")
+print("=" * 70)
+
+print("\n--- CV Metrics Per Horizon ---")
+for horizon in time_horizons:
+    print(f"\n  {horizon}h:")
+    for mn in model_names:
+        m = model_metrics[(mn, horizon)]
+        v = valid_models[(mn, horizon)]
+        print(f"    {mn:8s}: AUC={m['auc']:.4f}, STD={m['fold_std']:.4f}, valid={v}")
+
+print("\n--- Ensemble OOF Summary ---")
+for horizon in time_horizons:
+    _, y, _ = horizon_data[horizon]
+    oof_e = ensemble_oof[horizon]
+    if len(np.unique(y)) > 1:
+        print(f"  {horizon}h: AUC={roc_auc_score(y, oof_e):.4f}, Brier={brier_score_loss(y, oof_e):.4f}")
+
+print("\n--- OOF vs TEST Mean ---")
+for j, horizon in enumerate(time_horizons):
+    _, y, _ = horizon_data[horizon]
+    oof_mean = ensemble_oof[horizon].mean()
+    test_mean = pred_matrix[:, j].mean()
+    diff = abs(oof_mean - test_mean)
+    print(f"  {horizon}h: OOF={oof_mean:.4f}, TEST={test_mean:.4f}, diff={diff:.4f}")
+
+print("\n--- Prediction Distribution ---")
+for j, t in enumerate(time_horizons):
+    col = pred_matrix[:, j]
+    print(f"  prob_{t}h: mean={col.mean():.4f}, std={col.std():.4f}")
+
+print("\n--- Flat Prediction Summary ---")
+print(f"  Before fix: {flat_before}")
+print(f"  After fix:  {flat_after}")
+
+print("\n--- Fixes Applied ---")
+print("  [1] Progressive survival masking (no naive fallback)")
+print("  [2] Ranking features (rank_dist, rank_speed)")
+print("  [3] Feature stability selection")
+print("  [4] LightGBM: num_leaves=10, max_depth=3, min_child_samples=25")
+print("  [5] Ensemble OOF validation (AUC + Brier)")
+print("  [6] Reduced shrinkage (0.95/0.05)")
+print("  [7] Time-aware scaling [0.9, 1.0, 1.1, 1.2]")
+print("  [8] Power transform (pred ** 0.95)")
+print("  [9] Flat prediction fix (min increase 0.01)")
+print("  [10] Final monotonicity enforcement")
+print("  [11] Safety clip [0.02, 0.98]")
+print("  [12] Comprehensive validation report")
 
 print("\n" + "=" * 70)
-print("PIPELINE COMPLETE")
+print("PIPELINE v3.0 COMPLETE")
 print("=" * 70)
