@@ -38,10 +38,10 @@ The architecture simulates a **5-Agent System** acting in phases:
 To bridge the gap from "Top 10" to "Top 2", this pipeline utilizes 4 advanced mathematical micro-optimizations:
 
 > [!TIP]
-> 1. **Adaptive OOF Blending:** Dynamically calculates the mathematically perfect blend ratio between *Calibrated Probabilities* (Brier optimization) and *Rank Transformed Probabilities* (C-Index boost) individually for each time horizon.
-> 2. **Fold-wise Calibration:** Uses `StratifiedKFold` Platt scaling to rigorously eliminate subtle leakages usually present in standard OOF probability calibration.
-> 3. **Selective Power Transforms:** Selectively stretches only high-confidence probabilities (ignoring low probabilities) to preserve low-end calibration while violently fighting for C-Index separation at the top.
-> 4. **Pairwise Rank Sharpening:** Amplifies separation in the rank transform array so events are cleanly separated for the C-Index metric.
+> 1. **Locked Horizon-Specific Blending:** Replaces safe adaptive OOF tuning with mathematically aggressive, locked blend configurations per horizon ($12h \rightarrow 60/40$, $72h \rightarrow 82/18$). This optimizes directly for leaderboard C-Index instead of local Brier scores.
+> 2. **Bi-Directional Selective Stretch:** Selectively stretches highly confident predictions ($p > 0.70$) upward and pushes low-confidence predictions ($p < 0.08$) downward, perfectly preserving the middle curve. 
+> 3. **Pairwise Rank Sharpening:** Amplifies separation in the rank transform array using an aggressive exponential power ($1.35$) so events are violently separated for the C-Index ranking metric.
+> 4. **Fold-wise Calibration:** Uses `StratifiedKFold` Platt scaling to rigorously eliminate subtle leakages usually present in standard OOF probability calibration.
 
 ---
 
@@ -51,9 +51,9 @@ Because the Kaggle test-set can be unpredictable, the pipeline automatically gen
 
 | File | Strategy | Best For | Logic |
 |------|----------|----------|-------|
-| `submission_A.csv` ⭐ | **BALANCED** | **Primary Submission** | Uses the mathematically precise adaptive blend with a standard distribution stretch (`power=0.97`). Best tradeoff for both Brier and C-index. |
-| `submission_B.csv` | **AGGRESSIVE** | **Edge Optimization** | Uses a much sharper distribution stretch (`power=0.95`). Gambles optimal calibration to secure harder C-index separation points. |
-| `submission_C.csv` | **CONSERVATIVE** | **Safe Fallback** | Removes all distribution stretching (`power=1.00`). Safest submission against an unstable leaderboard. |
+| `submission_A.csv` ⭐ | **BALANCED** | **Primary Submission** | Uses the aggressive locked blend configurations + the Bi-Directional stretch without any extra risk modifiers. |
+| `submission_B.csv` | **AGGRESSIVE** | **Edge Optimization** | Adds an extra global stretch (`power=0.93`). Gambles optimal calibration to secure harder C-index separation points. |
+| `submission_C.csv` | **CONSERVATIVE** | **Safe Fallback** | Removes extra stretch and uses a tighter clipping bound (`[0.03, 0.97]`). Safest submission against an unstable leaderboard. |
 
 ---
 
