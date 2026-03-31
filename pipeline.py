@@ -314,13 +314,13 @@ for horizon in time_horizons:
         
         params = {
             'objective': 'binary', 'metric': 'binary_logloss',
-            'num_leaves': 10, 'max_depth': 3,           # FIX #4
-            'min_child_samples': 25,                     # FIX #4
-            'reg_alpha': 0.5, 'reg_lambda': 2.0,
-            'learning_rate': 0.03, 'n_estimators': 300,
+            'num_leaves': 15, 'max_depth': 4,
+            'min_child_samples': 15,
+            'reg_alpha': 0.3, 'reg_lambda': 1.5,
+            'learning_rate': 0.03, 'n_estimators': 400,
             'scale_pos_weight': spw,
             'verbosity': -1, 'random_state': RANDOM_STATE,
-            'subsample': 0.7, 'colsample_bytree': 0.7,
+            'subsample': 0.8, 'colsample_bytree': 0.8,
         }
         
         mdl = lgb.LGBMClassifier(**params)
@@ -473,7 +473,7 @@ for horizon in time_horizons:
     for mn in model_names:
         if valid_models[(mn, horizon)] and (mn, horizon) in calibrated_test:
             m = model_metrics[(mn, horizon)]
-            w = m['auc'] * (1.0 / (m['fold_std'] + 1e-3))  # stabilized weight
+            w = (m['auc'] ** 2) * (1.0 / (m['fold_std'] + 1e-2))  # auc² weighting
             valid.append((mn, w))
     
     if not valid:
@@ -492,9 +492,9 @@ for horizon in time_horizons:
         o_ens += nw * calibrated_oof[(mn, horizon)]
         print(f"  {horizon}h: {mn} weight={nw:.4f}")
     
-    # FIX #7: REDUCED shrinkage (0.95/0.05 instead of 0.9/0.1)
+    # Minimal shrinkage — preserve variance for C-index
     test_mean = t_ens.mean()
-    t_ens = 0.95 * t_ens + 0.05 * test_mean
+    t_ens = 0.98 * t_ens + 0.02 * test_mean
     
     ensemble_test[horizon] = t_ens
     ensemble_oof[horizon] = o_ens
