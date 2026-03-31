@@ -609,10 +609,10 @@ print("\n" + "=" * 80)
 print("  PHASE 8 — RANK TRANSFORMATION (C-INDEX BOOST)")
 print("=" * 80)
 
-# TWEAK #4: Sharpened ranks for better C-index separation
-def sharpen_ranks(pred, power=1.2):
+# TWEAK #4: Sharpened ranks for rigorous C-index separation (Top-2 Aggression)
+def sharpen_ranks(pred, power=1.35):  # Boosted from 1.2 to 1.35 for sharper separation
     ranks = rankdata(pred) / len(pred)
-    return np.power(ranks, power)  # amplify separation
+    return np.power(ranks, power)
 
 rank_test = {}
 rank_oof = {}
@@ -635,50 +635,41 @@ print("\n" + "=" * 80)
 print("  PHASE 9 — HYBRID BLENDING")
 print("=" * 80)
 
-# TWEAK #1: Adaptive OOF-tuned blend (finds optimal alpha per horizon)
-def find_best_blend(oof_cal, oof_rank, y):
-    best_alpha = 0.70
-    best_score = 1e9
-    for alpha in np.linspace(0.50, 0.95, 20):
-        pred = alpha * oof_cal + (1 - alpha) * oof_rank
-        pred = np.clip(pred, 0.001, 0.999)
-        brier = brier_score_loss(y, pred)
-        if brier < best_score:
-            best_score = brier
-            best_alpha = alpha
-    return best_alpha, best_score
+# Top-2 Aggressive Horizon-Specific Blend (Replaces safe adaptive OOF tuning)
+BLEND_CONFIG = {
+    12: (0.60, 0.40),  # aggressive ranking
+    24: (0.68, 0.32),
+    48: (0.72, 0.28),
+    72: (0.82, 0.18),  # safer
+}
 
-# TWEAK #3: Selective power (only high-confidence predictions)
-def selective_power(pred, power=0.97, threshold=0.6):
+# Bi-directional selective stretch (improves extremes without hurting middle)
+def selective_stretch_v2(pred):
     out = pred.copy()
-    mask = out > threshold
-    out[mask] = out[mask] ** power
+    high = out > 0.70
+    low  = out < 0.08
+    
+    out[high] = out[high] ** 0.93   # push up
+    out[low]  = out[low] ** 1.07    # push down
     return out
 
 hybrid_test = {}
-optimal_blends = {}
 
 for horizon in time_horizons:
-    _, y, _ = horizon_data[horizon]
     cal_prob = ensemble_test[horizon]
     rank_prob = rank_test[horizon]
     
-    # Find optimal blend using OOF
-    oof_cal = ensemble_oof[horizon]
-    oof_rk = rank_oof[horizon]
-    best_alpha, best_brier = find_best_blend(oof_cal, oof_rk, y)
-    optimal_blends[horizon] = best_alpha
+    cal_w, rank_w = BLEND_CONFIG[horizon]
     
-    # Apply optimal blend to test
-    hybrid = best_alpha * cal_prob + (1 - best_alpha) * rank_prob
+    hybrid = cal_w * cal_prob + rank_w * rank_prob
     hybrid = np.clip(hybrid, 0.01, 0.99)
     
-    # Selective power: only stretch confident predictions
-    hybrid = selective_power(hybrid, power=0.97, threshold=0.5)
+    # Apply Top-2 selective push
+    hybrid = selective_stretch_v2(hybrid)
     
     hybrid_test[horizon] = hybrid
     
-    print(f"  {horizon}h: optimal_alpha={best_alpha:.3f} (OOF Brier={best_brier:.4f}), "
+    print(f"  {horizon}h: blend={cal_w:.2f}/{rank_w:.2f}, "
           f"mean={hybrid.mean():.4f}, std={hybrid.std():.4f}")
 
 # ============================================================
@@ -798,8 +789,8 @@ print("=" * 80)
 
 # 3-submission strategy with different risk profiles
 submission_configs = {
-    'A': {'extra_power': None, 'clip_low': 0.02, 'clip_high': 0.98, 'desc': 'BALANCED (adaptive blend + selective power)'},
-    'B': {'extra_power': 0.95, 'clip_low': 0.01, 'clip_high': 0.99, 'desc': 'AGGRESSIVE (extra stretch)'},
+    'A': {'extra_power': None, 'clip_low': 0.02, 'clip_high': 0.98, 'desc': 'BALANCED (locked aggressive blend + bi-directional stretch)'},
+    'B': {'extra_power': 0.93, 'clip_low': 0.01, 'clip_high': 0.99, 'desc': 'AGGRESSIVE (extra edge stretch for C-index)'},
     'C': {'extra_power': None, 'clip_low': 0.03, 'clip_high': 0.97, 'desc': 'CONSERVATIVE (tighter clip)'},
 }
 
