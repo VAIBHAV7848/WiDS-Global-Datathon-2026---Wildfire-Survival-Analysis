@@ -22,76 +22,70 @@
 
 ---
 
-## 🧠 Approach: Pipeline v7.0 — "Nuclear Option"
+## 🧠 Approach: Pipeline v8.1 — "Nuclear Option"
 
-This pipeline is purpose-built for the extreme conditions of this competition: **221 training rows**, **152 right-censored observations**, and a metric that weights **calibration at 70%**.
+This pipeline is purpose-built for the extreme conditions of this competition: **221 training rows**, **152 right-censored observations**, and a metric that weights **calibration at 70%**. 
+
+After diagnosing that the persistent OOF-LB gap was caused purely by overfitting (verified via Adversarial Validation AUC=0.38), v8.1 focuses on maximizing **ensemble diversity** and **extreme regularization**.
 
 ### Architecture
 
 ```
 Phase 1: Data Loading
 Phase 2: IPCW Censoring Weights (Kaplan-Meier)
-Phase 3: Lean Feature Engineering (~21 features)
-Phase 4: Optuna Hyperparameter Tuning (40 trials/model/horizon)
-Phase 5: 6-Model Base Layer (IPCW-weighted, 5-seed, 5-fold CV)
-Phase 6: Seed Averaging
-Phase 7: Dual Calibration (Platt + Isotonic, best per model)
-Phase 8: Ridge Stacking Meta-Learner
-Phase 9: Smart Pseudo-Labeling (high-confidence consensus)
-Phase 10: Gentle Rank Blend (90-95% calibration-dominant)
-Phase 11: Comprehensive Validation
-Phase 12: Monotonicity Enforcement
-Phase 13-14: Submission Generation & Verification
+Phase 3: Survival Feature Engineering (47 features)
+Phase 4: Optuna Hyperparameter Tuning (100 trials, heavily regularized)
+Phase 5: 5-Model Base Layer (LGBM, XGB, CatBoost, ExtraTrees, RSF)
+Phase 6: Seed Averaging (10 Seeds)
+Phase 7: Isotonic Calibration (Best per model)
+Phase 8: Diversity-Preserving Blend (Softmax + 5% floor)
+Phase 9: Direct Pass (No stacking to prevent overfitting)
+Phase 10: Gentle Rank Blend (92-95% calibration-dominant)
+Phase 11: Validation
+Phase 12: Cummax Monotonicity
+Phase 13: Submission Generation (Strict [0.01, 0.99] clipping)
 ```
 
 ---
 
-## ⚡ Key Innovations
+## ⚡ Key Innovations in v8.1
 
-### 1. IPCW Censoring Weights (Inverse Probability of Censoring Weighting)
-The dataset has 152 censored observations — fires where we don't know if they hit the evacuation zone. Previous pipelines wrongly labeled ALL of these as negatives at 72h (max censored observation = 66.99h). IPCW uses a Kaplan-Meier censoring model to properly weight samples and exclude truly unknown outcomes.
+### 1. Survival-Specific Diversity
+Added `RandomSurvivalForest` natively handling right-censored observations to complement traditional GBDTs, bypassing the need for heuristic IPCW weighting for this specific model.
 
-### 2. Ridge Stacking Meta-Learner
-Instead of heuristic weighted averaging, a Ridge Regression meta-learner is trained on OOF predictions from all 6 base models. It *learns* the optimal blending from data. Improved Brier score on **all 4 horizons** vs simple averaging.
+### 2. Eliminating Optimization Collapses
+Replaced Scipy-optimized ensemble weights (which collapsed to single-model weights like 98% CatBoost, destroying diversity) with **Temperature-scaled Softmax Weights + 5% Floor**. This guarantees a robust ensemble spread (e.g., 20%-25% per model) while still favoring better models.
 
-### 3. Dual Calibration (Platt + Isotonic)
-Both calibration methods are applied per model per horizon, and the one with lower Brier score is kept. Isotonic calibration won for most models — a significant improvement over Platt-only.
+### 3. Horizon-Specific Pruning
+We discovered XGBoost at the 12h horizon generated pure noise (AUC=0.53). The v8.1 pipeline strictly skips XGBoost at 12h, eliminating a major source of Brier error.
 
-### 4. 6-Model Ensemble with IPCW Sample Weights
-All models receive proper IPCW sample weights during training:
-| Model | Role |
-|-------|------|
-| LightGBM | Optuna-tuned, high-performance GBDT |
-| XGBoost | Optuna-tuned, complementary GBDT |
-| CatBoost | Optuna-tuned, best single model (Hybrid=1.0 at 72h) |
-| RandomForest | Bagged ensemble for stability |
-| LogisticRegression | Linear baseline for calibration |
-| ExtraTreesClassifier | Randomized splits for diversity |
+### 4. Quadratic Brier Protection
+Predictions are strictly clipped to `[0.01, 0.99]`. Since C-index ignores absolute values (only cares about ranking), clipping preserves perfect ranking while mathematically shielding the metric from catastrophic quadratic Brier score penalties perfectly wrong extremes.
 
-### 5. Cascaded Horizon Modeling
-Lower-horizon predictions feed into higher-horizon stacking layers (12h → 24h → 48h → 72h), naturally enforcing monotonicity and sharing information across time horizons.
+### 5. Cummax Monotonicity
+Instead of cross-horizon averaging, monotonicity constraints (`P(12h) <= P(24h)`) are strictly forced using cumulative maximums. This accurately reflects a survival CDF.
 
 ---
 
-## 📊 Pipeline Validation Metrics (OOF)
+## 📊 Pipeline Validation Metrics (v8.1 OOF)
 
-| Horizon | Ensemble AUC | Stacked Brier | Hybrid Score |
-|---------|-------------|---------------|-------------|
-| **12h** | 0.9722 | 0.0539 | 0.9539 |
-| **24h** | 0.9884 | 0.0265 | 0.9780 |
-| **48h** | 0.9930 | 0.0178 | 0.9855 |
-| **72h** | 1.0000 | 0.0013 | 0.9991 |
+| Horizon | Brier Score | AUC |
+|---------|-------------|-----|
+| **12h** | 0.0507 | 0.9781 |
+| **24h** | 0.0248 | 0.9892 |
+| **48h** | 0.0135 | 0.9985 |
+| **72h** | 0.0000 | 1.0000 |
 
-**Estimated Hybrid Score: 0.98572**
+**Estimated Hybrid Score (OOF): 0.98846**
 
 ---
 
 ## 📂 Submission Strategy
 
-| File | Strategy | Submit |
+| File | Strategy | LB Score |
 |------|----------|--------|
-| `submission_A.csv` ⭐ | **FULL** — IPCW + Stacking + wide clips [0.005, 0.995] | **FIRST** |
-| `submission_B.csv` | **SAFE** — Same pipeline, tighter clips [0.015, 0.985] | SECOND |
+| `submission_06.csv` | Pipeline v7.2 (Fallback) | **0.95760** |
+| `submission_07.csv` ⭐ | **Pipeline v8.1 (New Best)** | TBD |
 
 ---
 
@@ -106,27 +100,19 @@ python -m venv .venv
 
 ### 2. Install Dependencies
 ```bash
-pip install pandas numpy scikit-learn lightgbm xgboost catboost optuna lifelines scipy
+pip install pandas numpy scikit-learn lightgbm xgboost catboost optuna lifelines scipy scikit-survival
 ```
 
 ### 3. Run the Pipeline
-```bash
+```powershell
+# Required encoding for Windows Terminals
+chcp 65001
+$env:PYTHONIOENCODING="utf-8"
+
 python pipeline.py
 ```
 
-This will:
-- Compute IPCW censoring weights via Kaplan-Meier
-- Tune 3 GBDT models with Optuna (40 trials each, 4 horizons)
-- Train 600 base models (6 models × 5 seeds × 4 horizons × 5 folds)
-- Stack with Ridge meta-learner
-- Calibrate, enforce monotonicity, and save submissions
-
-**Runtime:** ~7 minutes on a modern CPU.
-
-### 4. Submit to Kaggle
-```bash
-kaggle competitions submit -c WiDSWorldWide_GlobalDathon26 -f submission_A.csv -m "v7.0 IPCW+Stacking"
-```
+This will run ~950 models (5 types × 10 seeds × 4 horizons × 5 folds) taking around 13 minutes.
 
 ---
 
@@ -134,31 +120,13 @@ kaggle competitions submit -c WiDSWorldWide_GlobalDathon26 -f submission_A.csv -
 
 ```
 WiDS/
-├── pipeline.py            # Main pipeline (v7.0)
-├── train.csv              # Training data (221 rows)
-├── test.csv               # Test data (95 rows)
+├── pipeline.py            # Main pipeline (v8.1)
+├── train.csv              # Training data 
+├── test.csv               # Test data
 ├── sample_submission.csv  # Submission format template
 ├── metaData.csv           # Feature metadata
-├── submission.csv         # Main submission (= Variant A)
-├── submission_A.csv       # Variant A: Full pipeline
-├── submission_B.csv       # Variant B: Safer clips
-├── SESSION_Summary.md     # Session notes
-└── README.md              # This file
+├── submission_06.csv      # v7.2 submission 
+├── submission_07.csv      # v8.1 submission
+├── SESSION_Summary.md     # Engineering logbook
+└── README.md              # Documentation
 ```
-
----
-
-## 📈 Score Progression
-
-| Version | Key Change | Score |
-|---------|-----------|-------|
-| v1-v4 | LightGBM + aggressive rank sharpening | 0.94691 |
-| v5 | Pseudo-labeling + stretch (overfit) | 0.94691 |
-| v6 | 5-model ensemble + calibration-first | *not submitted* |
-| **v7** | **IPCW + Ridge stacking + 6 models** | **TBD** |
-
----
-
-<div align="center">
-  <strong>Built with 🔥 for WiDS Global Datathon 2026</strong>
-</div>

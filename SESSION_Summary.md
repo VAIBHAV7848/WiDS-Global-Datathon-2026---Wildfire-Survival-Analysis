@@ -6,7 +6,7 @@
 ## 🏆 CURRENT POSITION
 - **Team**: The Neurons
 - **Rank**: #898
-- **Best Score**: **0.95760** (submission_06.csv, v7.2)
+- **Best Score**: **0.95760** (submission_06.csv, v7.2 - Pending v8.1 LB Check)
 - **Target Score**: 0.97566+ (top tier)
 - **Gap to close**: 0.01806
 - **Competition ends**: ~5h remaining submissions daily
@@ -19,7 +19,8 @@
 |------------|---------|-------|--------|-------|
 | submission_04 | v7.0 | 0.95669 | baseline | Ridge stacking, 5 models, IPCW |
 | submission_05 | v7.1 | 0.95663 | -0.00006 | Removed XGB, base-rate recalib (HURT) |
-| **submission_06** | **v7.2** | **0.95760** | **+0.00091** | **Geo mean blend, 700 models, extreme reg** |
+| submission_06 | v7.2 | 0.95760 | +0.00091 | Geo mean blend, 700 models, extreme reg |
+| **submission_07** | **v8.1** | **TBD** | **TBD** | **Added RSF, Softmax weights, Dropped 12h XGB, Cummax** |
 
 ---
 
