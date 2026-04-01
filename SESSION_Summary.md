@@ -24,100 +24,64 @@
 
 ---
 
-## 🔬 KEY LEARNINGS (CRITICAL FOR TOMORROW)
+## 🔬 KEY LEARNINGS (v8.1 COMPLETION)
 
-### What WORKED ✅
-1. **Replacing Ridge stacking with Geometric Mean blend** — eliminated overfitting gap
-2. **7 random seeds** (vs 5) — more stable predictions
-3. **Extreme regularization** — forced models to generalize on 221 samples
-4. **60 Optuna trials** optimizing Brier score directly
-5. **Bringing XGBoost back** with heavy reg — diversity helps when regularized
-6. **Isotonic calibration only** — consistently best calibrator
-7. **39 features** (vs 22 in v7.1) — more engineered features helped
+### What WORKED in v8.1 ✅
+1. **RandomSurvivalForest integration** — successfully layered into the ensemble, providing structural diversity natively built for right-censoring.
+2. **Softmax Weighting with a 5% Floor** — guarantees ensemble spread. We learned that scipy optimization completely collapses weights (98% CatBoost), destroying diversity. The 5% floor fixed this perfectly.
+3. **Horizon-Specific Pruning** — cutting XGBoost purely out of the 12h horizon fixed a major source of noise (it had random-chance 0.53 AUC in v7.2).
+4. **Strict `[0.01, 0.99]` Clipping** — mathematics shows this perfectly shields the quadratic Brier score from catastrophe without altering the rank-based C-index at all.
+5. **Cummax Monotonicity** — strictly forcing `P(12h) <= P(24h)` using cummax is more accurate to survival CDFs than cross-horizon averaging.
 
 ### What HURT ❌
-1. **Base-rate recalibration** — v7.1 tried to force test mean → train mean, DECREASED score
-2. **Ridge stacking** — overfits on 221 samples (OOF=0.987 vs LB=0.957 = 0.03 gap)
-3. **Removing XGBoost entirely** — lost diversity, didn't help
-4. **Pseudo-labeling** — rejected every time by quality checks
+1. **Scipy Optimizer for Blending** — tested in v8.0 and immediately discarded in v8.1. It collapsed to single-model predictions, totally destroying the ensemble.
+2. **Post-Blend Isotonic Calibration** — also discarded from v8.0. It universally fell back to raw blending, meaning it added zero value but carried heavy overfitting risk on our 221 samples.
 
-### Key Numbers
-- OOF-LB gap reduced: 0.030 (v7.0) → 0.027 (v7.2) — IMPROVING
-- OOF estimate v7.2: 0.98579
-- Weighted Brier (OOF): 0.01569
-- Avg AUC (OOF): 0.98927
-- Total models: 700 (5 types × 7 seeds × 4 horizons × 5 folds)
+### Key Numbers (v8.1)
+- OOF estimate v8.1: **0.98846** (up from 0.98579)
+- Weighted Brier (OOF): **0.01283** (down from 0.01569)
+- Avg AUC (OOF): **0.99145** (up from 0.98927)
+- Total models: 950 (5 types × 10 seeds × 4 horizons × 5 folds)
 
 ---
 
-## 🔧 CURRENT PIPELINE (v7.2) ARCHITECTURE
+## 🔧 CURRENT PIPELINE (v8.1) ARCHITECTURE
 
 ```
-pipeline.py — v7.2 "Maximum Generalization"
+pipeline.py — v8.1 "Diversity & Extreme Regularization"
 
 PHASE 1: Data Loading (221 train, 95 test)
-PHASE 2: IPCW Censoring Weights (capped at 3x)
-PHASE 3: Feature Engineering (39 features)
-  - Raw features + log/inverse transforms
-  - risk_score composite, near_miss_margin
-  - Binary thresholds (is_close, is_very_close, is_approaching)
-  - Interaction features (dist×alignment, speed×close)
-  - Temporal (hour_sin, hour_cos)
-  - Growth threat features
-PHASE 4: Optuna Tuning (60 trials, Brier-optimized)
-  - LGBM, XGBoost, CatBoost each tuned per horizon
-  - Regularization-biased search space
-PHASE 5: 5-Model Base Layer × 7 seeds × 5 folds
-  - LightGBM, XGBoost, CatBoost, LogisticRegression, RandomForest
-PHASE 6: Seed Averaging (7 seeds)
-PHASE 7: Isotonic Calibration (CV-applied)
-PHASE 8: Weighted Geometric Mean Blend (NO stacking!)
-  - Weights from softmax of OOF hybrid scores
-  - Falls back to simple average if better
-PHASE 9: Gentle Rank Blend (92-95% calibration, 5-8% rank)
-PHASE 10-13: Validation, Monotonicity, Save
+PHASE 2: IPCW Censoring Weights
+PHASE 3: Survival Feature Engineering (47 features)
+PHASE 4: Optuna Tuning (100 trials, heavily regularized)
+PHASE 5: 5-Model Base Layer (LGBM, XGB, CatBoost, ExtraTrees, RSF)
+PHASE 6: Seed Averaging (10 Seeds)
+PHASE 7: Isotonic Calibration (Best per model)
+PHASE 8: Diversity-Preserving Blend (Softmax + 5% floor)
+PHASE 9: Direct Pass (No stacking)
+PHASE 10: Gentle Rank Blend (92-95% calibration-dominant)
+PHASE 11: Validation
+PHASE 12: Cummax Monotonicity
+PHASE 13: Submission Generation (Strict [0.01, 0.99] clipping)
 ```
 
 ---
 
 ## 🎯 STRATEGY FOR TOMORROW (April 2, 2026)
 
-### Priority Changes for v7.3 (highest impact first):
+When you wake up, check your Kaggle LB score for `submission_07.csv`. Based on the result, here is your path forward:
 
-1. **Survival-Specific Models**
-   - Add `sksurv.ensemble.RandomSurvivalForest`
-   - Add `sksurv.linear_model.CoxPHSurvivalAnalysis`
-   - These NATIVELY handle censoring — no IPCW needed
-   - Could unlock another 0.01+ improvement
+### If Score > 0.96500 (Success, Gap Shrinking) 📈
+Your diversity and extreme regularization strategy is working. The gap is shrinking.
+1. **Feature Engineering Focus**: The 47 features are good, but you can try adding non-linear interaction terms or polynomial features inside `pipeline.py`.
+2. **Increase Seeds**: Bump seeds from 10 to 15 to squeeze out micro-fractions of score stability.
+3. **Try CoxPH**: We added RSF, but you could try adding `sksurv.linear_model.CoxPHSurvivalAnalysis` alongside it for another unique model flavor.
 
-2. **Target Encoding with Leave-One-Out**
-   - Encode categorical-like features (month, day_of_week, hour bins)
-   - Must use LOO to prevent leakage on 221 samples
-
-3. **Adversarial Validation**
-   - Check if train/test distributions differ
-   - If they do, reweight training samples to match test
-   - This could explain the remaining OOF-LB gap
-
-4. **Optimize Clip Range**
-   - Current: [0.005, 0.995]
-   - Try: [0.01, 0.99] — Brier heavily penalizes extreme errors
-   - A single wrong extreme prediction tanks the score
-
-5. **Horizon-Specific Model Selection**
-   - 12h: Distance features dominate
-   - 72h: Needs more temporal/growth features
-   - Train separate feature subsets per horizon
-
-6. **Ensemble Weight Optimization**
-   - Use scipy.optimize to find exact optimal blend weights
-   - Current softmax-based weights may not be optimal
-
-### DO NOT TRY (proven failures):
-- ❌ Base-rate recalibration (decreased score)
-- ❌ Ridge/Linear stacking (overfits on 221 samples)
-- ❌ Pseudo-labeling (always rejected by quality checks)
-- ❌ Removing entire models (diversity > individual quality)
+### If Score < 0.95760 (Regression, Gap Growing) 📉
+v8.1 overfit despite our best efforts. If `[0.01, 0.99]` clipping caused this, try wider clips.
+1. **Fallback**: Submit `submission_06.csv` (v7.2) to secure your ranking.
+2. **Tweak the Blend Floor**: Try raising the Softmax minimum floor from 5% to 15% to force even *more* diversity.
+3. **Re-evaluate Base Rates**: We saw in v8.1 that the 72h test prediction average (0.31) drifts heavily from the train base rate (0.42). If Kaggle penalizes this drift heavily, we may need to reconsider Base-Rate scaling (even though it failed previously in v7.1).
 
 ---
 
@@ -125,39 +89,25 @@ PHASE 10-13: Validation, Monotonicity, Save
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `pipeline.py` | Main pipeline v7.2 | ✅ Current |
-| `submission_06.csv` | Best submission (0.95760) | ✅ Submitted |
-| `submission_05.csv` | v7.1 submission (0.95663) | Archived |
-| `submission_04.csv` | v7.0 submission (0.95669) | Archived |
+| `pipeline.py` | Main pipeline v8.1 | ✅ Current |
+| `submission_07.csv` | **Best v8.1 submission** | 🚀 Ready to Submit |
+| `submission_06.csv` | Fallback v7.2 submission (0.95760) | ✅ Fallback |
 | `train.csv` | Training data (221 rows) | Static |
 | `test.csv` | Test data (95 rows) | Static |
 | `metaData.csv` | Feature metadata | Static |
 | `sample_submission.csv` | Submission format template | Static |
-| `run_log.txt` | Latest pipeline output | Auto-generated |
+| `run_log_v8_1.txt` | Latest pipeline execution log | Saved |
 | `README.md` | Project documentation | ✅ Updated |
-
----
-
-## 🖥️ ENVIRONMENT
-
-- **OS**: Windows
-- **Python**: d:\WiDS\.venv\Scripts\python.exe
-- **Key packages**: xgboost, catboost, lightgbm, optuna, scikit-learn, lifelines, scipy, pandas, numpy
-- **Encoding**: Must run `chcp 65001` and `$env:PYTHONIOENCODING="utf-8"` before pipeline
-- **GitHub**: Pushed to main, commit `8aa45cb`
 
 ---
 
 ## 💡 QUICK START TOMORROW
 
 ```powershell
+# 1. Check your Kaggle LB score for submission_07.csv!
+# 2. Then, run the environment:
 cd d:\WiDS
 chcp 65001
 $env:PYTHONIOENCODING="utf-8"
 d:\WiDS\.venv\Scripts\python.exe d:\WiDS\pipeline.py
-# Then submit submission_A.csv to Kaggle
 ```
-
----
-
-*Session saved: April 1, 2026, 12:05 PM IST*
