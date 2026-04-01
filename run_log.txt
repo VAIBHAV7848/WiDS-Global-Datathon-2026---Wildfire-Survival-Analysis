@@ -1,0 +1,251 @@
+﻿================================================================================
+  PIPELINE v7.0 -- NUCLEAR OPTION
+================================================================================
+
+  Train: 221 rows x 37 cols
+  Test:  95 rows x 35 cols
+  Event=1 (hit): 69
+  Event=0 (censored): 152
+  Hit rate: 0.3122
+  Hits <= 12h: 49 (22.2%)
+  Hits <= 24h: 63 (28.5%)
+  Hits <= 48h: 66 (29.9%)
+  Hits <= 72h: 69 (31.2%)
+
+================================================================================
+  PHASE 2 -- IPCW CENSORING WEIGHTS
+================================================================================
+  12h: 49 pos + 166 neg = 215 included (6 excluded as unknown)
+         Weight range: [0.330, 6.593], mean=1.000
+  24h: 63 pos + 133 neg = 196 included (25 excluded as unknown)
+         Weight range: [0.310, 6.192], mean=1.000
+  48h: 66 pos + 100 neg = 166 included (55 excluded as unknown)
+         Weight range: [0.279, 5.582], mean=1.000
+  72h: 69 pos + 41 neg = 110 included (111 excluded as unknown)
+         Weight range: [0.241, 4.826], mean=1.000
+
+================================================================================
+  PHASE 3 -- LEAN FEATURE ENGINEERING (~20 features)
+================================================================================
+  Feature count: 33
+  Dropping highly correlated (11): {'speed_x_close', 'closing_velocity', 'log_time_projected', 'dist_slope_ci_0_5h', 'projected_advance_m', 'centroid_speed_m_per_h', 'dist_change_rate', 'proximity_threat', 'near_miss_margin', 'directional_threat', 'dist_change_ci_0_5h'}
+  [OK] Final feature count: 22
+
+================================================================================
+  PHASE 4 -- OPTUNA TUNING (40 trials/model/horizon)
+================================================================================
+
+  --- Tuning 12h (49 pos / 215 total) ---
+    LightGBM (40 trials)...
+    [OK] LightGBM done
+    CatBoost (40 trials)...
+    [OK] CatBoost done
+
+  --- Tuning 24h (63 pos / 196 total) ---
+    LightGBM (40 trials)...
+    [OK] LightGBM done
+    CatBoost (40 trials)...
+    [OK] CatBoost done
+
+  --- Tuning 48h (66 pos / 166 total) ---
+    LightGBM (40 trials)...
+    [OK] LightGBM done
+    CatBoost (40 trials)...
+    [OK] CatBoost done
+
+  --- Tuning 72h (69 pos / 110 total) ---
+    LightGBM (40 trials)...
+    [OK] LightGBM done
+    CatBoost (40 trials)...
+    [OK] CatBoost done
+
+================================================================================
+  PHASE 5 -- 5-MODEL BASE LAYER (IPCW-weighted)
+================================================================================
+
+  --- 12h (215 samples, 49 pos) ---
+    lgbm      : AUC=0.9484+/-0.0045, Brier=0.0737, Hybrid=0.9329
+    catboost  : AUC=0.9759+/-0.0037, Brier=0.0503, Hybrid=0.9576
+    logreg    : AUC=0.9608+/-0.0010, Brier=0.0833, Hybrid=0.9299
+    rf        : AUC=0.9648+/-0.0022, Brier=0.0640, Hybrid=0.9446
+    et        : AUC=0.9659+/-0.0016, Brier=0.0675, Hybrid=0.9426
+
+  --- 24h (196 samples, 63 pos) ---
+    lgbm      : AUC=0.9703+/-0.0044, Brier=0.0399, Hybrid=0.9632
+    catboost  : AUC=0.9918+/-0.0027, Brier=0.0233, Hybrid=0.9812
+    logreg    : AUC=0.9803+/-0.0010, Brier=0.0453, Hybrid=0.9624
+    rf        : AUC=0.9789+/-0.0049, Brier=0.0320, Hybrid=0.9713
+    et        : AUC=0.9783+/-0.0018, Brier=0.0516, Hybrid=0.9573
+
+  --- 48h (166 samples, 66 pos) ---
+    lgbm      : AUC=0.9764+/-0.0018, Brier=0.0352, Hybrid=0.9682
+    catboost  : AUC=0.9976+/-0.0008, Brier=0.0155, Hybrid=0.9884
+    logreg    : AUC=0.9820+/-0.0011, Brier=0.0409, Hybrid=0.9660
+    rf        : AUC=0.9834+/-0.0051, Brier=0.0258, Hybrid=0.9770
+    et        : AUC=0.9809+/-0.0022, Brier=0.0612, Hybrid=0.9515
+
+  --- 72h (110 samples, 69 pos) ---
+    lgbm      : AUC=1.0000+/-0.0000, Brier=0.0315, Hybrid=0.9780
+    catboost  : AUC=1.0000+/-0.0000, Brier=0.0001, Hybrid=1.0000
+    logreg    : AUC=1.0000+/-0.0000, Brier=0.0311, Hybrid=0.9782
+    rf        : AUC=1.0000+/-0.0000, Brier=0.0207, Hybrid=0.9855
+    et        : AUC=1.0000+/-0.0000, Brier=0.0914, Hybrid=0.9360
+
+================================================================================
+  PHASE 6 -- SEED AVERAGING
+================================================================================
+  [OK] Averaged OOF and TEST predictions across 5 seeds
+
+================================================================================
+  PHASE 7 -- DUAL CALIBRATION
+================================================================================
+  lgbm       @ 12h: raw=0.0728 platt=0.0795 iso=0.0660 -> [ISOTONIC]
+  catboost   @ 12h: raw=0.0486 platt=0.0552 iso=0.0549 -> [RAW]
+  logreg     @ 12h: raw=0.0832 platt=0.0705 iso=0.0615 -> [ISOTONIC]
+  rf         @ 12h: raw=0.0638 platt=0.0656 iso=0.0535 -> [ISOTONIC]
+  et         @ 12h: raw=0.0673 platt=0.0706 iso=0.0536 -> [ISOTONIC]
+  lgbm       @ 24h: raw=0.0398 platt=0.0387 iso=0.0291 -> [ISOTONIC]
+  catboost   @ 24h: raw=0.0212 platt=0.0266 iso=0.0286 -> [RAW]
+  logreg     @ 24h: raw=0.0452 platt=0.0426 iso=0.0412 -> [ISOTONIC]
+  rf         @ 24h: raw=0.0318 platt=0.0357 iso=0.0294 -> [ISOTONIC]
+  et         @ 24h: raw=0.0514 platt=0.0460 iso=0.0291 -> [ISOTONIC]
+  lgbm       @ 48h: raw=0.0352 platt=0.0304 iso=0.0180 -> [ISOTONIC]
+  catboost   @ 48h: raw=0.0133 platt=0.0198 iso=0.0207 -> [RAW]
+  logreg     @ 48h: raw=0.0408 platt=0.0397 iso=0.0252 -> [ISOTONIC]
+  rf         @ 48h: raw=0.0256 platt=0.0283 iso=0.0186 -> [ISOTONIC]
+  et         @ 48h: raw=0.0609 platt=0.0440 iso=0.0184 -> [ISOTONIC]
+  lgbm       @ 72h: raw=0.0305 platt=0.0238 iso=0.0008 -> [ISOTONIC]
+  catboost   @ 72h: raw=0.0000 platt=0.0105 iso=0.0000 -> [ISOTONIC]
+  logreg     @ 72h: raw=0.0310 platt=0.0343 iso=0.0039 -> [ISOTONIC]
+  rf         @ 72h: raw=0.0204 platt=0.0244 iso=0.0035 -> [ISOTONIC]
+  et         @ 72h: raw=0.0907 platt=0.0460 iso=0.0019 -> [ISOTONIC]
+
+================================================================================
+  PHASE 8 -- RIDGE STACKING META-LEARNER
+================================================================================
+  12h: alpha=10.0, 7 features
+         Simple avg Brier=0.0529 -> Stacked Brier=0.0533 (SAME)
+         Stacked AUC=0.9723, Hybrid=0.9543
+  24h: alpha=1.0, 8 features
+         Simple avg Brier=0.0274 -> Stacked Brier=0.0226 (BETTER)
+         Stacked AUC=0.9926, Hybrid=0.9820
+  48h: alpha=5.0, 8 features
+         Simple avg Brier=0.0167 -> Stacked Brier=0.0166 (BETTER)
+         Stacked AUC=0.9918, Hybrid=0.9859
+  72h: alpha=0.001, 8 features
+         Simple avg Brier=0.0008 -> Stacked Brier=0.0008 (SAME)
+         Stacked AUC=1.0000, Hybrid=0.9994
+
+================================================================================
+  PHASE 9 -- SMART PSEUDO-LABELING
+================================================================================
+  12h: 0 strong positives, 66 strong negatives
+         Pseudo-label rejected (would worsen alignment)
+  24h: 0 strong positives, 64 strong negatives
+         Pseudo-label rejected (would worsen alignment)
+  48h: 21 strong positives, 64 strong negatives
+         Pseudo-label rejected (would worsen alignment)
+  72h: 25 strong positives, 65 strong negatives
+         Pseudo-label rejected (would worsen alignment)
+
+================================================================================
+  PHASE 10 -- GENTLE RANK BLEND + BASE RATE RECALIBRATION
+================================================================================
+  12h: cal/rank=0.92/0.08, mean=0.2072 -> 0.2072 (target=0.2217)
+         std=0.2900
+  24h: cal/rank=0.93/0.07, mean=0.2769 -> 0.2769 (target=0.2851)
+         std=0.3929
+  48h: cal/rank=0.94/0.06, mean=0.2979 -> 0.2979 (target=0.2986)
+         std=0.4224
+  72h: cal/rank=0.95/0.05, mean=0.3056 -> 0.3056 (target=0.3122)
+         std=0.4430
+
+  --- Full Training Base Rates ---
+  12h: 0.2217
+  24h: 0.2851
+  48h: 0.2986
+  72h: 0.3122
+
+================================================================================
+  PHASE 11 -- COMPREHENSIVE VALIDATION
+================================================================================
+
+  --- Stacked OOF Metrics ---
+  12h: AUC=0.9723, Brier=0.0533, Hybrid=0.9543
+  24h: AUC=0.9926, Brier=0.0226, Hybrid=0.9820
+  48h: AUC=0.9918, Brier=0.0166, Hybrid=0.9859
+  72h: AUC=1.0000, Brier=0.0008, Hybrid=0.9994
+
+  >>> ESTIMATED HYBRID SCORE: 0.98719
+      Weighted Brier: 0.01366
+      Avg AUC: 0.98917
+
+  --- Base Rate Alignment ---
+  [OK] 12h: base_rate=0.2279, test_mean=0.2072, diff=0.0207
+  [WARN] 24h: base_rate=0.3214, test_mean=0.2769, diff=0.0445
+  [WARN] 48h: base_rate=0.3976, test_mean=0.2979, diff=0.0997
+  [WARN] 72h: base_rate=0.6273, test_mean=0.3056, diff=0.3217
+
+================================================================================
+  PHASE 12 -- MONOTONICITY ENFORCEMENT
+================================================================================
+
+================================================================================
+  PHASE 13 -- SUBMISSION GENERATION
+================================================================================
+
+  --- Submission A: FULL (IPCW + Stacking + Pseudo-Labels, wide clip) ---
+    Monotonicity violations: 128 -> 0
+    prob_12h: mean=0.1993, std=0.2913, [0.0051, 0.9739]
+    prob_24h: mean=0.2790, std=0.3921, [0.0149, 0.9792]
+    prob_48h: mean=0.3033, std=0.4204, [0.0179, 0.9924]
+    prob_72h: mean=0.3169, std=0.4359, [0.0209, 0.9950]
+
+  --- Submission B: SAFE (IPCW + Stacking, tighter clip) ---
+    Monotonicity violations: 128 -> 0
+    prob_12h: mean=0.2006, std=0.2904, [0.0150, 0.9739]
+    prob_24h: mean=0.2796, std=0.3917, [0.0180, 0.9792]
+    prob_48h: mean=0.3037, std=0.4196, [0.0210, 0.9850]
+    prob_72h: mean=0.3154, std=0.4323, [0.0240, 0.9850]
+
+================================================================================
+  PHASE 14 -- FINAL VERIFICATION & SAVE
+================================================================================
+
+  Submission A:
+    [OK] rows
+    [OK] cols
+    [OK] ids
+    [OK] no_nan
+    [OK] no_inf
+    [OK] range
+    [OK] monotonicity
+    >>> SAVED: d:\WiDS\submission_A.csv
+
+  Submission B:
+    [OK] rows
+    [OK] cols
+    [OK] ids
+    [OK] no_nan
+    [OK] no_inf
+    [OK] range
+    [OK] monotonicity
+    >>> SAVED: d:\WiDS\submission_B.csv
+
+  >>> MAIN submission.csv = Variant A
+
+================================================================================
+  PIPELINE v7.0 COMPLETE -- 315s elapsed
+================================================================================
+
+  Models: 5 x 5 seeds x 4 horizons x 5 folds
+  = 500 total base models + stacking
+  Features: 22
+
+  --- RECOMMENDATION ---
+    Submit submission_A.csv FIRST (full pipeline)
+    Submit submission_B.csv SECOND (safer clips)
+
+================================================================================
+  v7.0 NUCLEAR OPTION -- READY FOR LEADERBOARD
+================================================================================

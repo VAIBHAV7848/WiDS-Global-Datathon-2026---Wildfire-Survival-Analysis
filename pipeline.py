@@ -243,18 +243,31 @@ if low_var:
     all_features = [f for f in all_features if f not in low_var]
 
 # === DROP HIGHLY CORRELATED (>0.95) ===
+# PROTECT key features that must never be dropped
+PROTECTED_FEATURES = {'dist_min_ci_0_5h', 'closing_speed_m_per_h', 'alignment_abs',
+                      'log_dist_min', 'inv_dist', 'time_to_hit_projected'}
+
 corr_matrix = train_fe[all_features].corr().abs()
 upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
 to_drop = set()
 for col in upper.columns:
     high_corr = upper.index[upper[col] > 0.95].tolist()
     for hc in high_corr:
-        corr_event_col = abs(train_fe[col].corr(train_fe['event']))
-        corr_event_hc = abs(train_fe[hc].corr(train_fe['event']))
-        if corr_event_col >= corr_event_hc:
+        # Never drop protected features
+        if hc in PROTECTED_FEATURES and col not in PROTECTED_FEATURES:
+            to_drop.add(col)
+        elif col in PROTECTED_FEATURES and hc not in PROTECTED_FEATURES:
             to_drop.add(hc)
         else:
-            to_drop.add(col)
+            corr_event_col = abs(train_fe[col].corr(train_fe['event']))
+            corr_event_hc = abs(train_fe[hc].corr(train_fe['event']))
+            if corr_event_col >= corr_event_hc:
+                to_drop.add(hc)
+            else:
+                to_drop.add(col)
+
+# Final filter: never drop protected
+to_drop -= PROTECTED_FEATURES
 
 if to_drop:
     print(f"  Dropping highly correlated ({len(to_drop)}): {to_drop}")
@@ -401,24 +414,22 @@ for horizon in time_horizons:
     best_params[('lgbm', horizon)] = tune_lgbm(X_h, y_h, w_h)
     print(f"    [OK] LightGBM done")
     
-    print(f"    XGBoost ({N_OPTUNA_TRIALS} trials)...")
-    best_params[('xgb', horizon)] = tune_xgb(X_h, y_h, w_h)
-    print(f"    [OK] XGBoost done")
+
     
     print(f"    CatBoost ({N_OPTUNA_TRIALS} trials)...")
     best_params[('catboost', horizon)] = tune_catboost(X_h, y_h, w_h)
     print(f"    [OK] CatBoost done")
 
 # ============================================================
-# PHASE 5 -- 6-MODEL BASE LAYER TRAINING
+# PHASE 5 -- 5-MODEL BASE LAYER TRAINING (XGB removed)
 # ============================================================
 print("\n" + "=" * 80)
-print("  PHASE 5 -- 6-MODEL BASE LAYER (IPCW-weighted)")
+print("  PHASE 5 -- 5-MODEL BASE LAYER (IPCW-weighted)")
 print("=" * 80)
 
 SEEDS = [42, 52, 62, 72, 82]
 N_SPLITS = 5
-model_names = ['lgbm', 'xgb', 'catboost', 'logreg', 'rf', 'et']
+model_names = ['lgbm', 'catboost', 'logreg', 'rf', 'et']  # XGBoost removed (AUC=0.77 dragging ensemble)
 
 all_oof_preds = {}
 all_test_preds = {}
@@ -450,26 +461,7 @@ for horizon in time_horizons:
         all_oof_preds[('lgbm', horizon, seed)] = oof_lgbm
         all_test_preds[('lgbm', horizon, seed)] = test_lgbm.mean(axis=0)
         
-        # ---- XGBoost (Optuna-tuned, IPCW-weighted) ----
-        oof_xgb = np.zeros(len(y_h))
-        test_xgb = np.zeros((N_SPLITS, len(X_test)))
-        
-        bp_x = best_params[('xgb', horizon)].copy()
-        bp_x.update({'objective': 'binary:logistic', 'eval_metric': 'logloss',
-                     'early_stopping_rounds': 30,
-                     'n_estimators': 500, 'tree_method': 'hist',
-                     'verbosity': 0, 'random_state': seed})
-        
-        for fi, (tr_idx, val_idx) in enumerate(skf.split(X_h, y_h)):
-            mdl = xgb.XGBClassifier(**bp_x)
-            mdl.fit(X_h[tr_idx], y_h[tr_idx], sample_weight=w_h[tr_idx],
-                    eval_set=[(X_h[val_idx], y_h[val_idx])],
-                    verbose=False)
-            oof_xgb[val_idx] = mdl.predict_proba(X_h[val_idx])[:, 1]
-            test_xgb[fi] = mdl.predict_proba(X_test)[:, 1]
-        
-        all_oof_preds[('xgb', horizon, seed)] = oof_xgb
-        all_test_preds[('xgb', horizon, seed)] = test_xgb.mean(axis=0)
+
         
         # ---- CatBoost (Optuna-tuned, IPCW-weighted) ----
         oof_cat = np.zeros(len(y_h))
@@ -852,21 +844,41 @@ if not pseudo_label_applied:
     print("  No pseudo-labels met consensus threshold -- using base stacking only")
 
 # ============================================================
-# PHASE 10 -- GENTLE RANK BLEND (calibration-dominant)
+# PHASE 10 -- GENTLE RANK BLEND + BASE RATE RECALIBRATION
 # ============================================================
 print("\n" + "=" * 80)
-print("  PHASE 10 -- GENTLE RANK BLEND")
+print("  PHASE 10 -- GENTLE RANK BLEND + BASE RATE RECALIBRATION")
 print("=" * 80)
 
 BLEND_CONFIG = {
-    12: (0.90, 0.10),
-    24: (0.92, 0.08),
+    12: (0.92, 0.08),
+    24: (0.93, 0.07),
     48: (0.94, 0.06),
     72: (0.95, 0.05),
 }
 
+# Use FULL training set base rates (not IPCW-filtered) for test alignment
+# because test set contains all types of samples
+FULL_BASE_RATES = {}
+for horizon in time_horizons:
+    n_hit = ((train['event'] == 1) & (train['time_to_hit_hours'] <= horizon)).sum()
+    FULL_BASE_RATES[horizon] = n_hit / len(train)
+
 def gentle_ranks(pred):
     return rankdata(pred) / len(pred)
+
+def recalibrate_to_base_rate(pred, target_mean, strength=0.3):
+    """Gently shift predictions toward expected base rate."""
+    current_mean = pred.mean()
+    if abs(current_mean - target_mean) < 0.02:
+        return pred  # already aligned
+    
+    # Logit-space shift: more principled than linear scaling
+    eps = 1e-6
+    logit_pred = np.log(np.clip(pred, eps, 1-eps) / (1 - np.clip(pred, eps, 1-eps)))
+    shift = np.log(target_mean / (1 - target_mean)) - np.log(current_mean / (1 - current_mean))
+    adjusted = 1.0 / (1.0 + np.exp(-(logit_pred + shift * strength)))
+    return adjusted
 
 hybrid_test = {}
 
@@ -878,9 +890,20 @@ for horizon in time_horizons:
     hybrid = cal_w * cal_prob + rank_w * rank_prob
     hybrid = np.clip(hybrid, 0.005, 0.995)
     
+    # Recalibrate toward full-training-set base rate
+    target_br = FULL_BASE_RATES[horizon]
+    hybrid_before = hybrid.mean()
+    hybrid = recalibrate_to_base_rate(hybrid, target_br, strength=0.4)
+    hybrid = np.clip(hybrid, 0.005, 0.995)
+    
     hybrid_test[horizon] = hybrid
     print(f"  {horizon}h: cal/rank={cal_w:.2f}/{rank_w:.2f}, "
-          f"mean={hybrid.mean():.4f}, std={hybrid.std():.4f}")
+          f"mean={hybrid_before:.4f} -> {hybrid.mean():.4f} (target={target_br:.4f})")
+    print(f"         std={hybrid.std():.4f}")
+
+print("\n  --- Full Training Base Rates ---")
+for h, br in FULL_BASE_RATES.items():
+    print(f"  {h}h: {br:.4f}")
 
 # ============================================================
 # PHASE 11 -- COMPREHENSIVE VALIDATION
