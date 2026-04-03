@@ -1,0 +1,17 @@
+pandas
+numpy
+scikit-learn
+lightgbm
+catboost
+xgboost
+optuna
+lifelines
+scikit-survival
+scipy
+fastparquet
+pyarrow
+matplotlib
+seaborn
+geopandas
+rasterio
+shapely
