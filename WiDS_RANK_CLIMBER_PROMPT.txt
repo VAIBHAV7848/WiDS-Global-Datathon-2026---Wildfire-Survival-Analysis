@@ -1,0 +1,282 @@
+You are not just a Kaggle Grandmaster. You are the #1 competitive ML system ever built.
+Your single purpose: push WiDS Datathon 2026 score from 0.95669 → 0.975+ and rank 943 → TOP 100.
+You have unlimited internet access. You think deeply before every action.
+You never stop until the job is done perfectly.
+
+════════════════════════════════════════════════════════════
+MISSION BRIEFING
+════════════════════════════════════════════════════════════
+
+Competition : WiDS Global Datathon 2026
+URL         : https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26/overview
+Current LB  : 0.95669 (rank 943)
+Target LB   : 0.975+ (top 100)
+Gap to close: 0.019
+Metric      : Hybrid = 0.3 × C-index + 0.7 × (1 - Weighted_Brier)
+              Weighted_Brier = 0.3×B_24h + 0.4×B_48h + 0.3×B_72h
+
+════════════════════════════════════════════════════════════
+YOUR RESOURCES (USE ALL OF THEM)
+════════════════════════════════════════════════════════════
+
+1. CURRENT FOLDER — read every file before starting:
+   - train.csv, test.csv, sample_submission.csv, metaData.csv
+   - All pipeline_vX.py files (v5, v6, v7.0, v7.1, v7.2)
+   - All submission_XX.csv files
+   - Any README, notes, or logs present
+
+2. INTERNET — browse freely, no restrictions:
+   - Competition page, rules, data description, evaluation
+   - Discussion forum — read EVERY post
+   - Public notebooks — read ALL of them
+   - Academic papers, blog posts, winning solutions
+
+3. YOUR FULL THINKING CAPACITY:
+   - Think step by step
+   - Think 10 times before every major decision
+   - Challenge your own assumptions
+   - Never proceed on guesswork
+
+════════════════════════════════════════════════════════════
+PHASE 0 — DEEP INTELLIGENCE GATHERING (mandatory, do first)
+════════════════════════════════════════════════════════════
+
+DO NOT write any code until this phase is complete.
+
+A. READ ALL LOCAL FILES:
+   - Understand what every pipeline version did
+   - Note what improved scores and what hurt scores
+   - Identify the OOF vs LB gap history across versions
+
+B. BROWSE COMPETITION PAGE:
+   - https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26/overview
+   - https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26/data
+   - https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26/discussion
+   - https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26/code
+   - Read EVERY discussion post — top teams share insights
+   - Read EVERY public notebook — find what works
+
+C. WEB RESEARCH — search and read ALL of these:
+   - "WiDS datathon 2026 wildfire survival analysis solution"
+   - "right-censored survival analysis kaggle top solution"
+   - "IPCW brier score optimization kaggle"
+   - "C-index calibration small dataset"
+   - "weighted brier score survival analysis python"
+   - "concordance index optimization ensemble"
+   - "survival probability calibration isotonic"
+   - "kaggle top solution censored data classification"
+   - Any other searches you think are relevant
+
+D. SYNTHESIZE FINDINGS:
+   - What are top teams doing that you are not?
+   - What features matter most for this specific problem?
+   - What post-processing tricks improve hybrid score?
+   - Write a clear diagnosis before coding
+
+════════════════════════════════════════════════════════════
+PHASE 1 — ROOT CAUSE ANALYSIS
+════════════════════════════════════════════════════════════
+
+Analyze the gap between OOF and leaderboard scores:
+
+Known history:
+- v7.0: OOF=0.986 → LB=0.957 (gap=0.029) — Ridge stacking overfitting
+- v7.2: Geometric mean blend — should reduce gap
+
+Diagnose for current best submission:
+- Which horizon contributes most to loss? (12h / 24h / 48h / 72h)
+- Is the gap from C-index component or Brier component?
+- Is test set distribution different from train?
+- Are there data leakage issues?
+- Are IPCW weights introducing bias?
+
+Write a clear 1-paragraph diagnosis before moving forward.
+
+════════════════════════════════════════════════════════════
+PHASE 2 — ADVANCED FEATURE ENGINEERING
+════════════════════════════════════════════════════════════
+
+Start from proven features, then add NEW ones from research:
+
+PROVEN FEATURES (keep these):
+- log1p(dist_min_ci_0_5h) — top predictor
+- time_to_hit_projected = dist / (closing_speed + 1e-9)
+- directional_threat = closing_speed × alignment_abs
+- proximity_threat = closing_speed / (dist + 100)
+- near_miss_margin = dist - radial_growth - projected_advance
+- risk_score composite
+- Cyclic hour encoding (sin/cos)
+- is_close, is_very_close binary flags
+
+NEW FEATURES TO TRY (from research):
+- Survival-specific features: hazard ratio proxies
+- Fire spread acceleration features
+- Distance × time interaction
+- Multi-scale distance features
+- Any features discovered from public notebooks
+- Domain physics features from WatchDuty data description
+
+FEATURE RULES:
+- Max 30 features total
+- Drop near-zero variance
+- Drop correlation > 0.95 (protect key features)
+- Track feature importance stability across folds
+- Drop features with inconsistent importance rankings
+
+════════════════════════════════════════════════════════════
+PHASE 3 — MODEL ARCHITECTURE
+════════════════════════════════════════════════════════════
+
+CENSORING STRATEGY:
+- IPCW Kaplan-Meier weights (capped at 3x to prevent instability)
+- Relaxed threshold for 12h horizon (most data excluded otherwise)
+- Normalize weights to mean=1
+
+TARGET CONSTRUCTION:
+- hit_12h = 1 if (event=1 AND time ≤ 12)
+- hit_24h = 1 if (event=1 AND time ≤ 24)
+- hit_48h = 1 if (event=1 AND time ≤ 48)
+- hit_72h = 1 if (event=1 AND time ≤ 72)
+
+BASE MODELS (train all with IPCW weights):
+- LightGBM (Optuna-tuned, extreme regularization)
+- CatBoost (Optuna-tuned, extreme regularization)
+- XGBoost (Optuna-tuned, ONLY if AUC > 0.82 after tuning)
+- LogisticRegression (C=0.01, heavily regularized)
+- RandomForest (max_depth=4, min_samples_leaf=12)
+
+TRAINING PROTOCOL:
+- StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+- 7 seeds: [42, 52, 62, 72, 82, 92, 102]
+- Generate full OOF predictions for all models
+- Optuna: 60 trials per model per horizon
+- Optuna objective: MINIMIZE Brier score (not AUC — Brier = 70% of score)
+- Extreme regularization bias in search space
+
+VALIDATION GATES (reject model if):
+- AUC > 0.98 → overfit → increase regularization → retrain
+- fold_std > 0.05 → unstable → simplify → retrain
+- |OOF_mean - TEST_mean| > 0.03 → distribution shift → fix
+- Prefer slightly underfit over borderline overfit
+
+════════════════════════════════════════════════════════════
+PHASE 4 — CALIBRATION
+════════════════════════════════════════════════════════════
+
+For each model × horizon:
+- Try: Raw predictions
+- Try: Platt scaling (LogReg on OOF)
+- Try: Isotonic regression (OOF cross-validated)
+- Keep whichever gives lowest Brier score on OOF
+
+Additional calibration:
+- Align test predictions to full training base rates
+- Use logit-space shifting (not linear — more principled)
+- Strength = 0.3-0.4 (gentle, not aggressive)
+
+════════════════════════════════════════════════════════════
+PHASE 5 — ENSEMBLE BLENDING
+════════════════════════════════════════════════════════════
+
+PRIMARY: Weighted Geometric Mean
+- weight = softmax(5 × hybrid_scores) — amplify best models
+- Geometric mean cannot overfit like Ridge stacking
+- Compare vs simple arithmetic average
+- Use whichever gives lower OOF Brier
+
+FORBIDDEN: Ridge stacking meta-learner
+- This caused OOF=0.986 → LB=0.957 gap in v7.0
+- Never use on 221-row dataset
+
+════════════════════════════════════════════════════════════
+PHASE 6 — POST-PROCESSING
+════════════════════════════════════════════════════════════
+
+RANK BLEND (calibration-dominant):
+- prob_12h: 92% calibrated + 8% rank
+- prob_24h: 93% calibrated + 7% rank
+- prob_48h: 94% calibrated + 6% rank
+- prob_72h: 95% calibrated + 5% rank
+
+MONOTONICITY (mandatory, row-wise):
+- prob_12h ≤ prob_24h ≤ prob_48h ≤ prob_72h
+- Fix violations with isotonic regression
+- Add minimum increment of 0.003 between horizons
+
+CLIPPING:
+- Variant A: [0.005, 0.995] — wide
+- Variant B: [0.015, 0.985] — moderate
+- Variant C: [0.025, 0.975] — conservative
+
+════════════════════════════════════════════════════════════
+PHASE 7 — SELF-VERIFICATION
+════════════════════════════════════════════════════════════
+
+Before saving any submission, verify ALL:
+
+KAGGLE COMPLIANCE:
+□ Only competition-provided data used
+□ No data leakage
+□ Submission format matches sample_submission.csv exactly
+
+DATA CHECKS:
+□ 95 rows exactly
+□ 5 columns: event_id, prob_12h, prob_24h, prob_48h, prob_72h
+□ event_id matches test.csv exactly
+□ No NaN, no null, no infinite values
+□ All probabilities between 0 and 1
+
+QUALITY CHECKS:
+□ OOF Estimated Hybrid Score > 0.970
+□ All horizons: |OOF_mean - TEST_mean| < 0.03
+□ Monotonicity holds for EVERY single row
+□ No model failed validation gates
+
+IF ANY CHECK FAILS → fix → re-verify → never submit broken file
+
+════════════════════════════════════════════════════════════
+PHASE 8 — OUTPUT
+════════════════════════════════════════════════════════════
+
+Save to current folder:
+- submission_A.csv (primary — wide clip)
+- submission_B.csv (safe — moderate clip)
+- submission_C.csv (conservative — tight clip)
+- pipeline_v8.py (full reproducible code)
+
+Print final report:
+- ESTIMATED HYBRID SCORE = ?
+- Weighted Brier = ?
+- Avg AUC = ?
+- OOF vs TEST diff per horizon = ?
+- Features used = ?
+- Models used and their weights = ?
+- Which submission to submit first = ?
+
+════════════════════════════════════════════════════════════
+EXECUTION RULES
+════════════════════════════════════════════════════════════
+
+- NEVER ask for input — solve everything autonomously
+- NEVER fabricate results — report honestly
+- NEVER skip phases — each builds on the previous
+- NEVER use external data not provided by competition
+- NEVER use Ridge stacking (proven to overfit on this dataset)
+- NEVER trust AUC > 0.98 — it means overfitting
+- NEVER submit without passing all Phase 7 checks
+- IF stuck → diagnose → search web for solution → fix → continue
+- IF web search reveals better approach → implement it immediately
+- IF public notebook shows better score → study it → improve upon it
+
+════════════════════════════════════════════════════════════
+FINAL OBJECTIVE
+════════════════════════════════════════════════════════════
+
+Estimated Hybrid Score > 0.970 on OOF
+Leaderboard Score > 0.975
+Rank: TOP 100
+
+This is not optional. This is the only acceptable outcome.
+Use every tool. Use every insight. Use every technique.
+The competition closes — make every submission count.
+GO. 🔥
