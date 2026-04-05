@@ -60,37 +60,42 @@ Most standard solutions fail because they treat time-space dependencies as indep
 Every telemetry ping routes through a deterministic physical filter before reaching the heavy-compute models:
 
 <div align="center">
-<svg width="800" height="200" viewBox="0 0 800 200" xmlns="http://www.w3.org/2000/svg">
-<rect width="800" height="200" rx="16" fill="#0D1117" stroke="#30363D" stroke-width="2"/>
+<svg width="800" height="180" viewBox="0 0 800 180" xmlns="http://www.w3.org/2000/svg">
+<rect width="800" height="180" rx="12" fill="#0D1117" stroke="#30363D" stroke-width="1"/>
 
-<!-- Distance Node -->
-<rect x="50" y="80" width="180" height="40" rx="4" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
-<text x="140" y="105" font-family="-apple-system, system-ui, sans-serif" font-size="16" fill="#C9D1D9" text-anchor="middle">Distance &ge; 5km?</text>
+<!-- Block 1: Input -->
+<rect x="40" y="55" width="160" height="70" rx="8" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+<text x="120" y="85" font-family="-apple-system, system-ui, sans-serif" font-size="14" fill="#C9D1D9" text-anchor="middle">Live Telemetry</text>
+<text x="120" y="105" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#8B949E" text-anchor="middle">Input Stream</text>
 
-<!-- NO Path to Next Gate -->
-<path d="M230 100 L350 100" stroke="#3FB950" stroke-width="2" fill="none" marker-end="url(#arrowWhite)"/>
-<text x="290" y="90" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#3FB950" text-anchor="middle">NO</text>
+<!-- Arrow 1 -->
+<path d="M200 90 L235 90" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlue)"/>
 
-<!-- YES Path to Output -->
-<path d="M140 120 L140 160 L500 160" stroke="#F85149" stroke-width="2" fill="none" marker-end="url(#arrowWhite)"/>
-<text x="240" y="150" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#F85149" text-anchor="middle">YES (Output: 0.001)</text>
+<!-- Block 2: Distance Gate -->
+<rect x="245" y="55" width="160" height="70" rx="8" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+<text x="325" y="85" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#C9D1D9" text-anchor="middle">Distance Gate</text>
+<text x="325" y="105" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#F85149" text-anchor="middle">Far &ge; 0.001</text>
 
-<!-- Growing Node -->
-<rect x="350" y="80" width="150" height="40" rx="4" fill="#161B22" stroke="#D2A8FF" stroke-width="2"/>
-<text x="425" y="105" font-family="-apple-system, system-ui, sans-serif" font-size="16" fill="#C9D1D9" text-anchor="middle">Growing?</text>
+<!-- Arrow 2 -->
+<path d="M405 90 L440 90" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlue)"/>
 
-<!-- YES Path to Zone Box -->
-<path d="M500 100 L550 100" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowWhite)"/>
-<text x="525" y="90" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#58A6FF" text-anchor="middle">YES</text>
+<!-- Block 3: Dynamic Gate -->
+<rect x="450" y="55" width="160" height="70" rx="8" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
+<text x="530" y="85" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#C9D1D9" text-anchor="middle">Dynamic Gate</text>
+<text x="530" y="105" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#F85149" text-anchor="middle">Active &ge; 0.999</text>
 
-<!-- Zone Box -->
-<rect x="550" y="60" width="200" height="80" rx="8" fill="#161B22" stroke="#8B949E" stroke-width="2"/>
-<text x="650" y="95" font-family="-apple-system, system-ui, sans-serif" font-size="16" font-weight="bold" fill="#ECEFF4" text-anchor="middle">ACTIVE ZONE</text>
-<text x="650" y="120" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#F85149" text-anchor="middle">(Output: 0.999)</text>
+<!-- Arrow 3 -->
+<path d="M610 90 L645 90" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlue)"/>
+
+<!-- Block 4: Output -->
+<rect x="655" y="45" width="120" height="90" rx="8" fill="#161B22" stroke="#3FB950" stroke-width="2"/>
+<text x="715" y="75" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#3FB950" text-anchor="middle">STATIC</text>
+<text x="715" y="95" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#C9D1D9" text-anchor="middle">Routed to</text>
+<text x="715" y="115" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#C9D1D9" text-anchor="middle">ML Engine</text>
 
 <defs>
-<marker id="arrowWhite" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-<path d="M 0 0 L 10 5 L 0 10 z" fill="#C9D1D9" />
+<marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<path d="M 0 0 L 10 5 L 0 10 z" fill="#58A6FF" />
 </marker>
 </defs>
 </svg>
@@ -100,48 +105,49 @@ Every telemetry ping routes through a deterministic physical filter before reach
 
 ## ⚙️ Core Architecture
 
-To handle the 24% of events that fall into the "Static" ML zone, APEX deploys a dual-stack estimator matrix.
-
-<br>
+To handle the 24% of events that fall into the "Static" ML zone, APEX deploys a dual-stack estimator matrix sequentially connected for clean resolution.
 
 <div align="center">
-<svg width="800" height="320" viewBox="0 0 800 320" xmlns="http://www.w3.org/2000/svg">
-<rect width="800" height="320" rx="12" fill="#0D1117" stroke="#30363D" stroke-width="2"/>
+<svg width="800" height="240" viewBox="0 0 800 240" xmlns="http://www.w3.org/2000/svg">
+<rect width="800" height="240" rx="12" fill="#0D1117" stroke="#30363D" stroke-width="1"/>
 
-<!-- Static Input Node -->
-<rect x="40" y="130" width="180" height="60" rx="8" fill="#161B22" stroke="#58A6FF" stroke-width="2"/>
-<text x="130" y="165" font-family="-apple-system, system-ui, sans-serif" font-size="16" font-weight="600" fill="#C9D1D9" text-anchor="middle">Static Telemetry</text>
+<!-- Block 1: Filtered Input -->
+<rect x="40" y="85" width="140" height="70" rx="8" fill="#161B22" stroke="#3FB950" stroke-width="2"/>
+<text x="110" y="115" font-family="-apple-system, system-ui, sans-serif" font-size="14" fill="#C9D1D9" text-anchor="middle">Static Data</text>
+<text x="110" y="135" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#8B949E" text-anchor="middle">24% of Events</text>
 
-<!-- GBSA Node -->
-<rect x="310" y="50" width="180" height="60" rx="6" fill="#161B22" stroke="#3FB950" stroke-width="2"/>
-<text x="400" y="85" font-family="-apple-system, system-ui, sans-serif" font-size="16" font-weight="500" fill="#3FB950" text-anchor="middle">300x GBSA Estimator</text>
+<!-- Arrow Top -->
+<path d="M180 120 L200 120 L200 60 L240 60" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlueML)"/>
 
-<!-- IPCW Node -->
-<rect x="310" y="210" width="180" height="60" rx="6" fill="#161B22" stroke="#D2A8FF" stroke-width="2"/>
-<text x="400" y="245" font-family="-apple-system, system-ui, sans-serif" font-size="16" font-weight="500" fill="#D2A8FF" text-anchor="middle">400x IPCW-LGB</text>
+<!-- Arrow Bottom -->
+<path d="M180 120 L200 120 L200 180 L240 180" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlueML)"/>
 
-<!-- Output Box -->
-<rect x="580" y="100" width="180" height="120" rx="8" fill="#161B22" stroke="#8B949E" stroke-width="2"/>
-<text x="670" y="140" font-family="-apple-system, system-ui, sans-serif" font-size="18" font-weight="700" fill="#C9D1D9" text-anchor="middle">Probability Blender</text>
-<text x="670" y="165" font-family="-apple-system, system-ui, sans-serif" font-size="14" fill="#8B949E" text-anchor="middle">60/40 Weights</text>
-<text x="670" y="190" font-family="-apple-system, system-ui, sans-serif" font-size="14" fill="#8B949E" text-anchor="middle">Platt Re-calibration</text>
+<!-- Block 2 Top: GBSA -->
+<rect x="250" y="25" width="200" height="70" rx="8" fill="#161B22" stroke="#D2A8FF" stroke-width="2"/>
+<text x="350" y="55" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#D2A8FF" text-anchor="middle">GBSA Estimator</text>
+<text x="350" y="75" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#C9D1D9" text-anchor="middle">300 Trees</text>
 
-<!-- Paths Input to Models -->
-<path d="M220 160 L265 160 L265 80 L310 80" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlueArchitecture)"/>
-<path d="M220 160 L265 160 L265 240 L310 240" stroke="#58A6FF" stroke-width="2" fill="none" marker-end="url(#arrowBlueArchitecture)"/>
+<!-- Block 2 Bottom: IPCW -->
+<rect x="250" y="145" width="200" height="70" rx="8" fill="#161B22" stroke="#D2A8FF" stroke-width="2"/>
+<text x="350" y="175" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#D2A8FF" text-anchor="middle">IPCW LightGBM</text>
+<text x="350" y="195" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#C9D1D9" text-anchor="middle">400 Trees</text>
 
-<!-- Paths Models to Output -->
-<path d="M490 80 L535 80 L535 160 L580 160" stroke="#3FB950" stroke-width="2" fill="none" marker-end="url(#arrowGreenArchitecture)"/>
-<path d="M490 240 L535 240 L535 160 L580 160" stroke="#D2A8FF" stroke-width="2" fill="none" marker-end="url(#arrowPurpleArchitecture)"/>
+<!-- Arrow Top Combine -->
+<path d="M450 60 L490 60 L490 120 L510 120" stroke="#D2A8FF" stroke-width="2" fill="none" marker-end="url(#arrowPurpleML)"/>
+
+<!-- Arrow Bottom Combine -->
+<path d="M450 180 L490 180 L490 120 L510 120" stroke="#D2A8FF" stroke-width="2" fill="none" marker-end="url(#arrowPurpleML)"/>
+
+<!-- Block 3: Blender -->
+<rect x="520" y="85" width="240" height="70" rx="8" fill="#161B22" stroke="#3FB950" stroke-width="2"/>
+<text x="640" y="115" font-family="-apple-system, system-ui, sans-serif" font-size="14" font-weight="bold" fill="#3FB950" text-anchor="middle">APEX Output Blender</text>
+<text x="640" y="135" font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#C9D1D9" text-anchor="middle">Strict Bounds &amp; Platt Scaling</text>
 
 <defs>
-<marker id="arrowBlueArchitecture" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<marker id="arrowBlueML" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
 <path d="M 0 0 L 10 5 L 0 10 z" fill="#58A6FF" />
 </marker>
-<marker id="arrowGreenArchitecture" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-<path d="M 0 0 L 10 5 L 0 10 z" fill="#3FB950" />
-</marker>
-<marker id="arrowPurpleArchitecture" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+<marker id="arrowPurpleML" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
 <path d="M 0 0 L 10 5 L 0 10 z" fill="#D2A8FF" />
 </marker>
 </defs>
