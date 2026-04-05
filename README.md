@@ -52,28 +52,29 @@ Training data reveals a **perfect deterministic split** that most competitors mi
 
 <div align="center">
 
-```
-                    ┌──────────────────────────────────────┐
-                    │        DISTANCE FROM FIRE            │
-                    │         TO INFRASTRUCTURE            │
-                    └──────────────┬───────────────────────┘
-                                   │
-                    ┌──────────────┴───────────────────────┐
-                    │                                      │
-              ≥ 5km distance                        < 5km distance
-              ┌─────────┐                    ┌─────────────┴──────────┐
-              │         │                    │                        │
-              │ FAR     │              Growing/Active           Static/Still
-              │ ZONE    │              ┌──────────┐          ┌──────────────┐
-              │         │              │ ACTIVE   │          │   STATIC     │
-              └────┬────┘              │ ZONE     │          │   ZONE       │
-                   │                   └────┬─────┘          └──────┬───────┘
-                   │                        │                       │
-            Train: 0/152 hit          Train: 100% hit          ML Required
-            ┌──────────┐             ┌──────────┐          ┌───────────────┐
-            │ P = 0.001│             │ P = 0.999│          │ Survival      │
-            │          │             │          │          │ Ensemble      │
-            └──────────┘             └──────────┘          └───────────────┘
+```mermaid
+flowchart TD
+    A["🔥 WILDFIRE EVENT"] --> B{"📏 Distance to Infrastructure"}
+    
+    B -->|"≥ 5 km"| C["🌍 FAR ZONE"]
+    B -->|"< 5 km"| D{"📡 Fire Status"}
+    
+    D -->|"Growing / Active"| E["🔥 ACTIVE ZONE"]
+    D -->|"Static / Still"| F["🤖 STATIC ZONE"]
+    
+    C --> G["✅ P = 0.001\n0/152 hit in training"]
+    E --> H["⚠️ P = 0.999\n100% hit in training"]
+    F --> I["🧠 ML Ensemble\n5 models × 10 seeds × 5 folds"]
+
+    style A fill:#1a1a2e,stroke:#FF6F00,color:#FF6F00,stroke-width:3px
+    style B fill:#16213e,stroke:#00BCD4,color:#E0E0E0,stroke-width:2px
+    style C fill:#1B5E20,stroke:#4CAF50,color:#C8E6C9,stroke-width:2px
+    style D fill:#16213e,stroke:#FF9800,color:#E0E0E0,stroke-width:2px
+    style E fill:#B71C1C,stroke:#FF5252,color:#FFCDD2,stroke-width:2px
+    style F fill:#4A148C,stroke:#CE93D8,color:#E1BEE7,stroke-width:2px
+    style G fill:#2E7D32,stroke:#66BB6A,color:#E8F5E9,stroke-width:2px
+    style H fill:#D84315,stroke:#FF7043,color:#FBE9E7,stroke-width:2px
+    style I fill:#6A1B9A,stroke:#AB47BC,color:#F3E5F5,stroke-width:2px
 ```
 
 </div>
@@ -130,40 +131,37 @@ P = ML Ensemble
 
 The **~26 uncertain events** pass through a heavy-compute ensemble:
 
-```
-                    ┌─────────────────────────────────────┐
-                    │         STATIC ZONE INPUT            │
-                    │      (26 uncertain fire events)       │
-                    └──────────────┬────────────────────────┘
-                                   │
-                    ┌──────────────┴────────────────────────┐
-                    │     FEATURE ENGINEERING (15 feats)     │
-                    │  dt_first_last · alignment · log_dist  │
-                    │  bearing · speed · area · interactions  │
-                    └──────────────┬────────────────────────┘
-                                   │
-         ┌─────────┬───────────────┼──────────────┬──────────┐
-         ▼         ▼               ▼              ▼          ▼
-    ┌─────────┐ ┌───────┐ ┌────────────┐ ┌──────────┐ ┌─────────┐
-    │ LightGBM│ │GradBoost│ │ Logistic  │ │ CatBoost │ │ Random  │
-    │         │ │        │ │ Regression│ │          │ │ Forest  │
-    └────┬────┘ └───┬────┘ └─────┬─────┘ └────┬─────┘ └────┬────┘
-         │          │            │             │            │
-         └──────────┴────────────┴─────────────┴────────────┘
-                                   │
-                    ┌──────────────┴────────────────────────┐
-                    │    10 seeds × 5 folds = 250 models     │
-                    │    Averaged with h_blend ensemble       │
-                    └──────────────┬────────────────────────┘
-                                   │
-                    ┌──────────────┴────────────────────────┐
-                    │     MONOTONICITY ENFORCEMENT           │
-                    │   P(12h) ≤ P(24h) ≤ P(48h) ≤ P(72h)  │
-                    └──────────────┬────────────────────────┘
-                                   │
-                    ┌──────────────┴────────────────────────┐
-                    │        CLIP to [0.001, 0.999]          │
-                    └──────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A["📥 STATIC ZONE INPUT\n26 uncertain fire events"] --> B["⚙️ FEATURE ENGINEERING\n15 physics-grounded features"]
+    
+    B --> C["LightGBM"]
+    B --> D["GradientBoosting"]
+    B --> E["LogisticRegression"]
+    B --> F["CatBoost"]
+    B --> G["RandomForest"]
+    
+    C --> H["🔄 ENSEMBLE AVERAGING\n10 seeds × 5 folds = 250 models\n+ h_blend ranking signal"]
+    D --> H
+    E --> H
+    F --> H
+    G --> H
+    
+    H --> I["📐 MONOTONICITY ENFORCEMENT\nP 12h ≤ P 24h ≤ P 48h ≤ P 72h"]
+    I --> J["✂️ CLIP to 0.001 — 0.999"]
+    J --> K["📤 FINAL PREDICTION"]
+
+    style A fill:#4A148C,stroke:#CE93D8,color:#E1BEE7,stroke-width:2px
+    style B fill:#1A237E,stroke:#5C6BC0,color:#C5CAE9,stroke-width:2px
+    style C fill:#E65100,stroke:#FF9800,color:#FFF3E0,stroke-width:2px
+    style D fill:#1B5E20,stroke:#66BB6A,color:#E8F5E9,stroke-width:2px
+    style E fill:#0D47A1,stroke:#42A5F5,color:#E3F2FD,stroke-width:2px
+    style F fill:#F9A825,stroke:#FFEE58,color:#1a1a2e,stroke-width:2px
+    style G fill:#BF360C,stroke:#FF7043,color:#FBE9E7,stroke-width:2px
+    style H fill:#311B92,stroke:#7C4DFF,color:#EDE7F6,stroke-width:2px
+    style I fill:#006064,stroke:#26C6DA,color:#E0F7FA,stroke-width:2px
+    style J fill:#880E4F,stroke:#F06292,color:#FCE4EC,stroke-width:2px
+    style K fill:#2E7D32,stroke:#66BB6A,color:#E8F5E9,stroke-width:3px
 ```
 
 <br>
