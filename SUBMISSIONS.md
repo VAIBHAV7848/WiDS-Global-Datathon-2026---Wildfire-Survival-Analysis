@@ -1,58 +1,25 @@
-# WiDS 2026 - Submission Guide
+# 🔥 WiDS 2026 — Today's Submissions (Apr 6, 2025)
 
-## Which 3 to Submit (in order)
-
-### 1st Priority: `submission_v18_SAFE.csv`
-- **Strategy:** 5km Distance Gate + h_blend near-zone predictions
-- **Far zone (67 events, dist >= 5km):** Probability = 0.005 (they NEVER hit in training)
-- **Near zone (28 events, dist < 5km):** Uses proven h_blend predictions (0.97175 LB)
-- **Why best:** Fixes the massive 72h Brier score error in all other submissions
-- **Expected score:** 0.99+
-
-### 2nd Priority: `submission_v18_BLEND.csv`
-- **Strategy:** 5km Distance Gate + 50/50 blend of our ML models and h_blend for near zone
-- **Far zone (67 events):** Probability = 0.005 (same fix)
-- **Near zone (28 events):** Blend of LightGBM predictions + h_blend predictions
-- **Why second:** Same far-zone fix but different near-zone approach
-- **Expected score:** 0.98-0.99+
-
-### 3rd Priority (fallback): `submission.csv`
-- **Strategy:** h_blend of 4 public notebooks (proven LB = 0.97175)
-- **All 95 events:** Uses rank-weighted ensemble of 4 top Kaggle notebooks
-- **Why fallback:** Proven on leaderboard but has a flaw at 72h for far events
-- **Expected score:** 0.97175 (proven)
+**Current Best:** `0.97216` (submission_v18_BLEND.csv)  
+**Goal:** Beat 0.97216
 
 ---
 
-## The Key Insight: 5km Distance Gate
-
-Training data reveals a PERFECT split:
-- Under 5km distance: 69/69 events = 100% hit rate
-- Over 5km distance: 0/152 events = 0% hit rate
-
-The h_blend (and ALL other submissions except v18) assigns prob_72h = 0.894 to
-far-zone events. But they NEVER hit! This creates a massive Brier score penalty.
-
-Our v18 fixes assign 0.005 to far events, which should dramatically improve
-the Weighted Brier Score component (worth 70% of the final metric).
+### 🥇 SLOT 1 — `submission_v21_C.csv`
+**Submit at:** ~1:20 AM IST, Apr 6  
+**Description:** 3-zone gate (far=0.001, active=0.999, static=40% ML + 60% h_blend)  
+**Why:** Preserves proven h_blend ranking + adds ML signal. Tighter floor than v18_BLEND. Pushes 4 active events from ~0.87→0.999 (Brier gain ~0.014/event). Highest probability of beating 0.97216.
 
 ---
 
-## All Submission Files
+### 🥈 SLOT 2 — `submission_v20_MEGA.csv`
+**Submit at:** After SLOT 1 result  
+**Description:** 3-zone gate with independent calibration pipeline  
+**Why:** Completely different blending approach from v21_C. If the v21 pipeline has any flaw, v20_MEGA avoids it. Diversity hedge — catches errors the others miss.
 
-| File | Description | Far 72h | Status |
-|------|-------------|---------|--------|
-| submission_v18_SAFE.csv | Gate + h_blend near | 0.005 | SUBMIT 1ST |
-| submission_v18_BLEND.csv | Gate + blended near | 0.005 | SUBMIT 2ND |
-| submission_v18_GATE.csv | Gate + pure ML near | 0.005 | Backup |
-| submission.csv | h_blend 4-model LB=0.97175 | 0.894 | SUBMIT 3RD |
-| submission_hblend.csv | h_blend backup copy | 0.894 | Same as above |
-| submission1.csv | Downloaded reference | varies | Old |
-| submission_09.csv | Pipeline v9 | varies | Old |
-| submission_5model_avg.csv | 5-model weighted average | 0.979 | Not recommended |
-| submission_5model_rank.csv | 5-model rank blend | 1.000 | Not recommended |
-| submission_MEGA.csv | Mega blend | 0.894 | Not recommended |
-| submission_v17_A.csv | 6 ML models + h_blend | 0.351 | Not recommended |
-| submission_v17_B.csv | Pure ML ensemble | 0.575 | Not recommended |
-| submission_v17_C.csv | Safe ML blend | 0.360 | Not recommended |
-| submission_v17_OPTIMAL.csv | Per-horizon optimal | 0.894 | Not recommended |
+---
+
+### 🥉 SLOT 3 — `submission_v21_A.csv`
+**Submit at:** After SLOT 2 result  
+**Description:** 3-zone gate + 100% pure ML for static zone (zero h_blend)  
+**Why:** Most different from everything submitted so far. If h_blend has a hidden systematic error that ALL blended files inherit, v21_A is the ONLY file that escapes it. High risk, high reward.
