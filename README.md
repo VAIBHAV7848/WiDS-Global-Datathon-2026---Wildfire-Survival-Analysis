@@ -133,9 +133,15 @@ To handle the 24% of events that fall into the "Static" ML zone, APEX deploys a 
 
 ## 🎞️ Demo Video & Visualization
 
-![Pipeline Demo](https://via.placeholder.com/900x420?text=APEX+Pipeline+Demo)
+<div align="center">
+  <img src="https://placehold.co/900x400/161b22/58a6ff.png?text=APEX+Pipeline+Animation+(Simulated)" alt="Pipeline Demo" width="100%" />
 
-[![Watch Demo](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
+  <br><br>
+
+  <a href="https://www.youtube.com/">
+    <img src="https://placehold.co/900x400/161b22/f85149.png?text=%E2%96%B6++Play+Full+Architecture+Video" alt="Watch Demo" width="100%" />
+  </a>
+</div>
 
 ### 🎬 Product Demo Storyboard (Frame-by-Frame Generation)
 For those reconstructing the animation flow, the APEX UI demo executes perfectly in 6 frames:
