@@ -1,164 +1,314 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/WiDS_Global_Datathon_2026-Wildfire_Survival_Analysis-FF4500?style=for-the-badge&logoColor=white" alt="WiDS 2026" />
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- HERO SECTION -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,9,5&height=220&section=header&text=🔥%20APEX%20Engine&fontSize=52&fontAlignY=35&desc=Wildfire%20×%20Infrastructure%20Collision%20Predictor&descSize=18&descAlignY=55&animation=fadeIn&fontColor=ffffff" width="100%"/>
 
 <br>
 
-<h1 style="border-bottom: none; margin-bottom: 0;">APEX: Wildfire Collision Engine</h1>
+[![Kaggle Competition](https://img.shields.io/badge/WiDS_Global_Datathon-2026-FF6F00?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26)
+&nbsp;
+![Best Score](https://img.shields.io/badge/Best_LB_Score-0.97216-00C853?style=for-the-badge&logo=target&logoColor=white)
+&nbsp;
+[![Author](https://img.shields.io/badge/by-Vaibhav_Chavanpatil-8B5CF6?style=for-the-badge&logo=github&logoColor=white)](https://github.com/VAIBHAV7848)
 
-<p align="center" style="font-size: 1.2rem; color: #8b949e;">
-  <strong>Right-censored survival estimators paired with rigid physics bounds to predict grid infrastructure intersection.</strong>
-</p>
+<br>
 
-<p align="center">
-<a href="https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26">
-  <img src="https://img.shields.io/badge/Kaggle_Rank-Target_Top_100-20BEFF?style=flat-square&logo=kaggle&logoColor=white" alt="Kaggle Track" />
-</a>
-<a href="https://github.com/VAIBHAV7848">
-  <img src="https://img.shields.io/badge/Author-Vaibhav-blueviolet?style=flat-square&logo=github&logoColor=white" alt="Author" />
-</a>
-<img src="https://img.shields.io/badge/Pipeline-Deterministic%20ML-success?style=flat-square&logo=git&logoColor=white" alt="Methodology" />
-</p>
+<img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=22&pause=1000&color=FF6F00&center=true&vCenter=true&multiline=true&repeat=false&width=700&height=80&lines=Right-censored+survival+analysis;powered+by+physics-constrained+ML+ensemble" alt="Typing SVG" />
 
-<img src="https://image.pollinations.ai/prompt/cinematic%20wildfire%20approaching%20power%20lines%20dark%20mode%20technology?width=1200&height=350&nologo=true" width="100%" style="border-radius: 12px; box-shadow: 0px 4px 20px rgba(255, 69, 0, 0.2);" alt="Hero Wildfire" />
+<br>
+
+<img src="https://image.pollinations.ai/prompt/dramatic%20wildfire%20approaching%20electrical%20power%20transmission%20lines%20at%20night%20cinematic%20orange%20glow%20dark%20background%20realistic?width=1200&height=300&nologo=true" width="100%" style="border-radius: 16px;" alt="Wildfire approaching infrastructure"/>
 
 </div>
 
 <br>
 
-## ✦ The Challenge
+## 🎯 The Problem
 
-Given 5 hours of initiation telemetry from **Watch Duty**, we must predict the exact probability a wildfire will hit high-value grid infrastructure (power lines, substations) over **12h, 24h, 48h, and 72h** horizons.
+> **Predict** the probability that an active wildfire intersects high-value grid infrastructure (transmission lines, substations, roads) at **12h, 24h, 48h, and 72h** time horizons.
 
-Because this is a **right-censored survival problem**, standard binary classifiers fail. They mistake active, growing fires for "safe" simply because they haven't made impact *yet*. 
+This is a **right-censored survival analysis** problem — fires that haven't hit infrastructure *yet* aren't necessarily safe. Standard binary classification fails here. APEX combines **hard physics constraints** with **multi-model ML ensembles** to solve it.
 
 <br>
 
-## ✦ Why APEX Wins (The Leaderboard Strategy)
+## 📊 Competition Metric
 
-Most Kaggle solutions blindly feed geographic coordinates into a LightGBM regressor. **APEX does not guess what physics already knows.** By imposing absolute spatial constraints, we mathematically trap the penalty margins in the Brier Score.
+```
+Hybrid Score = 0.3 × C-index  +  0.7 × (1 − Weighted Brier)
+
+Weighted Brier = 0.3 × B(24h)  +  0.4 × B(48h)  +  0.3 × B(72h)
+```
+
+> **70% of the score is calibration accuracy** — getting probability values right matters 2.3× more than ranking events correctly.
+
+<br>
+
+## ⚡ The APEX Strategy — 3-Zone Gate
+
+Training data reveals a **perfect deterministic split** that most competitors miss:
+
+<div align="center">
+
+```
+                    ┌──────────────────────────────────────┐
+                    │        DISTANCE FROM FIRE            │
+                    │         TO INFRASTRUCTURE            │
+                    └──────────────┬───────────────────────┘
+                                   │
+                    ┌──────────────┴───────────────────────┐
+                    │                                      │
+              ≥ 5km distance                        < 5km distance
+              ┌─────────┐                    ┌─────────────┴──────────┐
+              │         │                    │                        │
+              │ FAR     │              Growing/Active           Static/Still
+              │ ZONE    │              ┌──────────┐          ┌──────────────┐
+              │         │              │ ACTIVE   │          │   STATIC     │
+              └────┬────┘              │ ZONE     │          │   ZONE       │
+                   │                   └────┬─────┘          └──────┬───────┘
+                   │                        │                       │
+            Train: 0/152 hit          Train: 100% hit          ML Required
+            ┌──────────┐             ┌──────────┐          ┌───────────────┐
+            │ P = 0.001│             │ P = 0.999│          │ Survival      │
+            │          │             │          │          │ Ensemble      │
+            └──────────┘             └──────────┘          └───────────────┘
+```
+
+</div>
 
 <div align="center">
 <table>
-  <tr>
-    <td align="center" width="33%">
-      <h3>🌍 The FAR Zone</h3>
-      <p>Fires <b>&ge; 5km</b> away physically cannot bridge the gap to infrastructure in 72h.</p>
-      <img src="https://img.shields.io/badge/Output-Fixed_at_0.001-3FB950?style=for-the-badge" />
-    </td>
-    <td align="center" width="33%">
-      <h3>🔥 The ACTIVE Zone</h3>
-      <p>Fires <b>&lt; 5km</b> that are actively growing represent an imminent crisis.</p>
-      <img src="https://img.shields.io/badge/Output-Fixed_at_0.999-FF4500?style=for-the-badge" />
-    </td>
-    <td align="center" width="33%">
-      <h3>🤖 The STATIC Zone</h3>
-      <p>The uncertain 24%. These are routed to the heavy-compute ML stack.</p>
-      <img src="https://img.shields.io/badge/Output-Survival_ML_Blend-D2A8FF?style=for-the-badge" />
-    </td>
-  </tr>
+<tr>
+<td align="center" width="33%">
+
+### 🌍 FAR Zone
+**Distance ≥ 5km**
+
+Training: **0 / 152** hit
+
+```
+P = 0.001
+```
+*Physics says: impossible*
+
+</td>
+<td align="center" width="33%">
+
+### 🔥 ACTIVE Zone
+**< 5km + Growing**
+
+Training: **100%** hit
+
+```
+P = 0.999
+```
+*Physics says: certain*
+
+</td>
+<td align="center" width="33%">
+
+### 🤖 STATIC Zone
+**< 5km + Still**
+
+Training: **uncertain**
+
+```
+P = ML Ensemble
+```
+*The real battleground*
+
+</td>
+</tr>
 </table>
 </div>
 
 <br>
 
-## ✦ System Architecture
+## 🧠 ML Architecture (Static Zone)
 
-APEX isolates the uncertain `STATIC` events and processes them identically through a dual-stack estimator matrix. 
+The **~26 uncertain events** pass through a heavy-compute ensemble:
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         STATIC ZONE INPUT            │
+                    │      (26 uncertain fire events)       │
+                    └──────────────┬────────────────────────┘
+                                   │
+                    ┌──────────────┴────────────────────────┐
+                    │     FEATURE ENGINEERING (15 feats)     │
+                    │  dt_first_last · alignment · log_dist  │
+                    │  bearing · speed · area · interactions  │
+                    └──────────────┬────────────────────────┘
+                                   │
+         ┌─────────┬───────────────┼──────────────┬──────────┐
+         ▼         ▼               ▼              ▼          ▼
+    ┌─────────┐ ┌───────┐ ┌────────────┐ ┌──────────┐ ┌─────────┐
+    │ LightGBM│ │GradBoost│ │ Logistic  │ │ CatBoost │ │ Random  │
+    │         │ │        │ │ Regression│ │          │ │ Forest  │
+    └────┬────┘ └───┬────┘ └─────┬─────┘ └────┬─────┘ └────┬────┘
+         │          │            │             │            │
+         └──────────┴────────────┴─────────────┴────────────┘
+                                   │
+                    ┌──────────────┴────────────────────────┐
+                    │    10 seeds × 5 folds = 250 models     │
+                    │    Averaged with h_blend ensemble       │
+                    └──────────────┬────────────────────────┘
+                                   │
+                    ┌──────────────┴────────────────────────┐
+                    │     MONOTONICITY ENFORCEMENT           │
+                    │   P(12h) ≤ P(24h) ≤ P(48h) ≤ P(72h)  │
+                    └──────────────┬────────────────────────┘
+                                   │
+                    ┌──────────────┴────────────────────────┐
+                    │        CLIP to [0.001, 0.999]          │
+                    └──────────────────────────────────────┘
+```
+
+<br>
+
+## 📈 Score Progression
 
 <div align="center">
-  <img src="https://image.pollinations.ai/prompt/abstract%20machine%20learning%20pipeline%20diagram%20dark%20modern%20ui%20glow?width=1000&height=250&nologo=true" width="100%" style="border-radius: 12px;" alt="Architecture Flow" />
+
+```
+Score    File                     What Changed
+─────    ────────────────────     ─────────────────────────────────
+0.9576   submission_06.csv        v7.2 — 700 model geometric blend
+0.9593   submission_07.csv        submission_07
+0.9596   submission_13.csv        Upgrade iteration
+0.9603   submission_08.csv        v10 — 6 model + pseudo-labels
+0.9610   submission_10_blend      v8 — CBSA+RSF+AFT+LGBM
+0.9631   submission_09.csv        v11 — GBSA+RSF+CB+LGBM survival
+─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+0.9718   submission.csv           h_blend of 4 public notebooks ← BIG JUMP
+0.9719   v18_SAFE.csv             + 5km distance gate
+0.9722   v18_BLEND.csv       ★   + 50% ML signal → BEST SCORE
+```
+
 </div>
 
-<br>
-
-> **GBSA (Gradient Boosting Survival Analysis):** Directly models the time-to-event objective curve.  
-> **IPCW LightGBM:** Computes Inverse Probability of Censoring Weights to mathematically account for structurally unresolved time horizons.
-
-Both models are strictly bounded by a chronologic monotonicity filter ensuring `P(12h) < P(24h) < P(48h) < P(72h)`, permanently eliminating sequential logic errors.
+> **Key insight**: The +0.009 jump from 0.963 → 0.972 came from **blending top public Kaggle kernels** via the h_blend algorithm — not from building a better solo model.
 
 <br>
 
-## ✦ Demonstration Run
-
-Watch the pipeline seamlessly filter, route, and predict. 
-
-<div align="center">
-  <img src="https://placehold.co/900x400/0d1117/3fb950.png?text=APEX+Pipeline+Visualizer+(Simulated)" width="100%" style="border-radius: 8px;" alt="Pipeline Animation" />
-</div>
-
-<br>
-
-<details>
-<summary><b>🎬 View the Step-by-Step Logic (Click to Expand)</b></summary>
-
-<br>
-
-1. **Ingest Pipeline:** Batches 95 Watch Duty telemetry pings.
-2. **Gate 1 (Distance &ge; 5km):** 76% of events immediately clamped to `0.001`.
-3. **Gate 2 (Active/Growing):** Imminent collision anomalies flagged to `0.999`.
-4. **Machine Learning Array:** The remaining "uncertain" data runs through 300 GBSA trees and 400 IPCW iterations.
-5. **Array Bounding Check:** Sequential chronologic logic is mathematically enforced.
-6. **Deploy:** Final predictions merged securely into `submission_A_physics.csv`.
-</details>
-
-<br>
-
-## ✦ Quick Start
-
-Deploy the APEX engine to your local hardware. Zero friction, completely deterministic.
+## 🚀 Quick Start
 
 ```bash
-# 1. Clone the environment
+# Clone
 git clone https://github.com/VAIBHAV7848/WiDS-Global-Datathon-2026---Wildfire-Survival-Analysis.git
 cd WiDS-Global-Datathon-2026---Wildfire-Survival-Analysis
 
-# 2. Spawn dependencies
+# Install
 pip install -r requirements.txt
 
-# 3. Ignite the pipeline (~5 min CPU)
-python pipeline_v22_APEX.py
+# Run the pipeline (~5 min on CPU)
+python pipeline_v21_ORACLE.py
 ```
 
 <br>
 
-## ✦ Generated Target Profiles
+## 📂 Repository Structure
 
-APEX auto-generates a three-tiered submission matrix based on your risk tolerance on the leaderboard.
-
-*   🥇 `submission_A_physics.csv`: **Primary Deployment.** 100% Physics Overrides merged with the integrated ML bounds. The lowest Brier penalty mathematically possible.
-*   🥈 `submission_C_blend.csv`: **Conservative Base.** 60/40 blend of precise physics and machine learning arrays. Protects against edge-stage spatial anomalies in the test set.
-*   🥉 `submission_B_model.csv`: **Baseline Output.** Pure gradient boosted machine learning with zero deterministic spatial gates.
-
-<br>
-
-## ✦ Repository Layout
-
-```text
-WiDS-Wildfire-Survival/
-├── 📊 Data/
-│   ├── train.csv                    # Ground-truth telemetry
-│   └── test.csv                     # Hidden Kaggle targets 
-├── 🔧 Pipelines/
-│   ├── pipeline_v22_APEX.py         # 🚀 Target Engine (Active)
-│   ├── pipeline_v21_ORACLE.py       # Legacy ensemble environment
-│   └── pipeline_v20_PHYSICS.py      # Spatial constraint testbed
-├── 📤 Submissions/
-│   └── submission_A_physics.csv     # ★ Kaggle submission protocol
-└── 📖 Docs/
-    └── SUBMISSIONS.md               # Leaderboard ranking analytics
+```
+.
+├── 🔧 Pipelines
+│   ├── pipeline_v22_APEX.py          # Latest experimental engine
+│   ├── pipeline_v21_ORACLE.py        # 3-zone gate + multi-model ensemble
+│   ├── pipeline_v20_PHYSICS.py       # Physics constraint testbed
+│   └── h_blend_ensemble.py           # h_blend replication (LB = 0.97175)
+│
+├── 📤 Submissions
+│   ├── submission_v21_C.csv          # 3-zone + 40%ML + 60%h_blend
+│   ├── submission_v21_A.csv          # 3-zone + pure ML
+│   ├── submission_v20_MEGA.csv       # 3-zone + alt calibration
+│   ├── submission_v18_BLEND.csv      # ★ Best LB = 0.97216
+│   └── submission.csv                # h_blend baseline (LB = 0.97175)
+│
+├── 📊 Data
+│   ├── train.csv                     # 221 events (69 hits, 152 censored)
+│   ├── test.csv                      # 95 events to predict
+│   ├── metaData.csv                  # Feature descriptions
+│   └── sample_submission.csv         # Submission format
+│
+└── 📖 Docs
+    ├── README.md                     # You are here
+    ├── SUBMISSIONS.md                # Today's submission plan
+    └── Analytics Engine.md                     # Automated workflow configuration
 ```
 
 <br>
 
-## ✦ Let's Connect
+## 🔑 Key Discoveries
 
-Architected and maintained by **Vaibhav Chavanpatil**.  
-Want to discuss machine learning, quantitative survival analysis, or the WiDS Kaggle strategy? 
+<table>
+<tr>
+<td>
 
-*   **GitHub:** [@VAIBHAV7848](https://github.com/VAIBHAV7848)
+**📐 The 5km Perfect Split**
+
+In 221 training events, every fire within 5km hit infrastructure. Every fire beyond 5km did not. Zero exceptions.
+
+</td>
+<td>
+
+**📊 Metric is 70% Brier**
+
+Calibration matters 2.3× more than ranking. Getting confident when you should be confident is rewarded heavily.
+
+</td>
+</tr>
+<tr>
+<td>
+
+**🤝 Ensemble > Solo Model**
+
+Our best solo ML scored 0.963. Blending 4 public notebooks via h_blend scored 0.972. Humility > engineering.
+
+</td>
+<td>
+
+**🎯 The Gate is Worth +0.002**
+
+Simply assigning 0.005 to far-zone events improved the h_blend score from 0.97175 → 0.97194. Free points.
+
+</td>
+</tr>
+</table>
+
+<br>
+
+## 🛠️ Tech Stack
 
 <div align="center">
-  <br>
-  <img src="https://img.shields.io/badge/Designed_for_WiDS_Global_Datathon-2026-1a1a2e?style=for-the-badge&logoColor=white" />
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![LightGBM](https://img.shields.io/badge/LightGBM-4.x-9ACD32?style=flat-square)
+![CatBoost](https://img.shields.io/badge/CatBoost-1.x-FFCC00?style=flat-square)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-1.x-F7931E?style=flat-square&logo=scikit-learn&logoColor=white)
+![Pandas](https://img.shields.io/badge/Pandas-2.x-150458?style=flat-square&logo=pandas&logoColor=white)
+![NumPy](https://img.shields.io/badge/NumPy-1.x-013243?style=flat-square&logo=numpy&logoColor=white)
+
+</div>
+
+<br>
+
+## 👤 Author
+
+<div align="center">
+
+**Vaibhav Chavanpatil**
+
+[![GitHub](https://img.shields.io/badge/GitHub-@VAIBHAV7848-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/VAIBHAV7848)
+[![Kaggle](https://img.shields.io/badge/Kaggle-Profile-20BEFF?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/vaibhavchavanpatil)
+
+</div>
+
+<br>
+
+<div align="center">
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=gradient&customColorList=12,9,5&height=120&section=footer&animation=fadeIn" width="100%"/>
+
 </div>
