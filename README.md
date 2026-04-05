@@ -131,6 +131,24 @@ To handle the 24% of events that fall into the "Static" ML zone, APEX deploys a 
 
 ---
 
+## 🎞️ Demo Video & Visualization
+
+![Pipeline Demo](https://via.placeholder.com/900x420?text=APEX+Pipeline+Demo)
+
+[![Watch Demo](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
+
+### 🎬 Product Demo Storyboard (Frame-by-Frame Generation)
+For those reconstructing the animation flow, the APEX UI demo executes perfectly in 6 frames:
+
+*   **Frame 1 (Ingest):** **`[ Blue UI Box ]`** A batch of Watch Duty telemetry pings flashes onto the dark-mode dashboard. Text glows: `"Analyzing 95 Wildfire Events..."`
+*   **Frame 2 (Physics Gate 1):** The screen splits. Data flows down into a **`[ Red UI Box: Distance ≥ 5km? ]`**. The path flashes right to a **`[ Green Box ]`**. Text overlay pops: `"76% of events clamped."` Output locks at exactly `0.001`.
+*   **Frame 3 (Physics Gate 2):** Remaining data drops to the second **`[ Red UI Box: Active + Growing? ]`**. An anomaly fires. Path routes right to a **`[ Green Box ]`**. Text: `"Imminent Collision Detected."` Output locks at `0.999`. 
+*   **Frame 4 (Machine Learning Initialization):** The surviving "uncertain" data drops into a **`[ Purple UI Box: STATIC ZONE ]`**. The dashboard zooms in natively.
+*   **Frame 5 (Heavy Compute):** The screen splits horizontally. We see twin progress graphs in **`[ Purple: 300x GBSA ]`** and **`[ Purple: 400x IPCW ]`** churning in real-time as survival curves rapidly flatten.
+*   **Frame 6 (Resolution):** The twin streams merge into a **`[ Green UI Box: Output ]`**. An array bounds filter flashes across the screen enforcing `P(12) < P(24) < P(48) < P(72)`. Final CSV successfully drops onto the screen.
+
+---
+
 ## 🛠 Tech Stack
 
 | Component | Framework | Purpose |
@@ -175,14 +193,6 @@ python pipeline_v22_APEX.py
 *   🥇 `submission_A_physics.csv`: **Primary.** The ultimate deployment output. 100% Physics Overrides alongside the integrated ML bounds.
 *   🥈 `submission_C_blend.csv`: **Safety Base.** 60/40 blend of rigorous physics and ML. Stabilizer for edge-stage spatial anomalies.
 *   🥉 `submission_B_model.csv`: **Raw Output.** Pure machine learning.
-
----
-
-## 🎞️ Pipeline Visualization
-
-![APEX Pipeline Demo](https://via.placeholder.com/900x420?text=APEX+Pipeline+Flow)
-
-[![Watch Demo](https://img.youtube.com/vi/VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=VIDEO_ID)
 
 ---
 
