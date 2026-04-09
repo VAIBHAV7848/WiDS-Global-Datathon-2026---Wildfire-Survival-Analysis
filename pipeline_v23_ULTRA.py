@@ -213,8 +213,8 @@ for h in EVAL_TIMES:
 # ============================================================
 # ASSEMBLE FULL-PREDICTIONS & APPLY PHYSICS GATES
 # ============================================================
-FAR_P = 0.005
-ACTIVE_P = 0.995
+FAR_P = 0.001
+ACTIVE_P = 0.999
 
 def build_full_probs(static_arr_dict, df_far, df_active, df_static, df_id):
     df = pd.DataFrame({"event_id": df_id})
