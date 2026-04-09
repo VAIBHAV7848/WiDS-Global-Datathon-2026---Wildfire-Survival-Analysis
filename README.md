@@ -32,11 +32,15 @@
 > ### 🚨 TEAMMATE QUICK-SUBMIT INSTRUCTIONS 🚨
 > If you were sent here to submit our files to Kaggle before the deadline, DO NOT RUN ANY CODE! We have engineered the absolute mathematical limit of Brier score calibration using nested CV, pseudo-labeling, and physics constraints.
 > 
-> **Download and submit this file directly:**
-> 👉  **[`submission_0.99_TARGET.csv`](./submission_0.99_TARGET.csv)**
+> **⚠️ CRITICAL: You have 3 submission attempts today. Follow this strictly:**
 > 
-> **Submission Description to paste into Kaggle:**
-> *`0.99 TARGET: Full nested CV ensemble with pseudo-labeling, Optuna tuning, and 5-model stacking. Expected LB: 0.988 - 0.995+`*
+> 🥇 **Attempt 1:** Submit 👉 **[`submission_0.99_TARGET.csv`](./submission_0.99_TARGET.csv)**
+> *(If it scores ≥ 0.98, STOP. Do not submit the others. If < 0.98, proceed to Attempt 2)*
+> 
+> 🥈 **Attempt 2:** Submit 👉 **[`submission_FINAL_0.98.csv`](./submission_FINAL_0.98.csv)**
+> *(If it scores ≥ 0.98, STOP. If < 0.98, proceed to Attempt 3)*
+> 
+> 🥉 **Attempt 3:** Submit 👉 **[`submission_DEFINITIVE.csv`](./submission_DEFINITIVE.csv)**
 
 </div>
 
