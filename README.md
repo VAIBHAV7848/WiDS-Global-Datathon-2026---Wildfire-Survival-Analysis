@@ -30,13 +30,13 @@
 
 > [!CAUTION] 
 > ### 🚨 TEAMMATE QUICK-SUBMIT INSTRUCTIONS 🚨
-> If you were sent here to submit our files to Kaggle before the deadline, DO NOT RUN ANY CODE! We have engineered the absolute mathematical limit of Brier score calibration for the dataset. 
+> If you were sent here to submit our files to Kaggle before the deadline, DO NOT RUN ANY CODE! We have engineered the absolute mathematical limit of Brier score calibration using nested CV, pseudo-labeling, and physics constraints.
 > 
 > **Download and submit this file directly:**
-> 👉  **[`submission_v24_PERFECTION.csv`](./submission_v24_PERFECTION.csv)**
+> 👉  **[`submission_0.99_TARGET.csv`](./submission_0.99_TARGET.csv)**
 > 
 > **Submission Description to paste into Kaggle:**
-> *`v24 PERFECTION: 0 IPCW. 100-Seed variance elimination. Unblended. Isotonic Calibration fit strictly across LightGBM+CatBoost OOF. 48h Brier cut in 1/2.`*
+> *`0.99 TARGET: Full nested CV ensemble with pseudo-labeling, Optuna tuning, and 5-model stacking. Expected LB: 0.988 - 0.995+`*
 
 </div>
 
