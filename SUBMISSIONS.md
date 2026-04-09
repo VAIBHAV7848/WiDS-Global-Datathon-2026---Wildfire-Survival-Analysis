@@ -1,7 +1,7 @@
-# 🔥 WiDS 2026 — Today's Submissions (Apr 6, 2025)
+# 🔥 WiDS 2026 — Submissions Log
 
-**Current Best:** `0.97216` (submission_v18_BLEND.csv)  
-**Goal:** Beat 0.97216
+**Current Best:** `0.97284` (submission_v20_MEGA.csv)  
+**Goal:** Beat 0.97284
 
 ---
 

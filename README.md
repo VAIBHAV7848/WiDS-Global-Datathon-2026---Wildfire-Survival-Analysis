@@ -10,7 +10,7 @@
 
 [![Kaggle Competition](https://img.shields.io/badge/WiDS_Global_Datathon-2026-FF6F00?style=for-the-badge&logo=kaggle&logoColor=white)](https://www.kaggle.com/competitions/WiDSWorldWide_GlobalDathon26)
 &nbsp;
-![Best Score](https://img.shields.io/badge/Best_LB_Score-0.97216-00C853?style=for-the-badge&logo=target&logoColor=white)
+![Best Score](https://img.shields.io/badge/Best_LB_Score-0.97284-00C853?style=for-the-badge&logo=target&logoColor=white)
 &nbsp;
 [![Author](https://img.shields.io/badge/by-Vaibhav_Chavanpatil-8B5CF6?style=for-the-badge&logo=github&logoColor=white)](https://github.com/VAIBHAV7848)
 
@@ -182,7 +182,8 @@ Score    File                     What Changed
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
 0.9718   submission.csv           h_blend of 4 public notebooks ← BIG JUMP
 0.9719   v18_SAFE.csv             + 5km distance gate
-0.9722   v18_BLEND.csv       ★   + 50% ML signal → BEST SCORE
+0.9722   v18_BLEND.csv            + 50% ML signal
+0.9728   v20_MEGA.csv        ★   + 3-zone gate alt calibration → BEST SCORE
 ```
 
 </div>
