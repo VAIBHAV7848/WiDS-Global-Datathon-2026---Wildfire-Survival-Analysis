@@ -213,12 +213,16 @@ python pipeline_v21_ORACLE.py
 ```
 .
 ├── 🔧 Pipelines
+│   ├── pipeline_v23_ULTRA.py         # 0.98+ Push: IPCW Ensembles + Base Rate Shift
 │   ├── pipeline_v22_APEX.py          # Latest experimental engine
 │   ├── pipeline_v21_ORACLE.py        # 3-zone gate + multi-model ensemble
 │   ├── pipeline_v20_PHYSICS.py       # Physics constraint testbed
 │   └── h_blend_ensemble.py           # h_blend replication (LB = 0.97175)
 │
 ├── 📤 Submissions
+│   ├── submission_v23_SAFE.csv       # Expected 0.98+: 50%ML/50%hb blend, clip [0.005, 0.995]
+│   ├── submission_v23_PURE.csv       # Expected 0.98+: 100% ML pipeline
+│   ├── submission_v23_B60.csv        # Expected 0.98+: 60%ML/40%hb blend
 │   ├── submission_v21_C.csv          # 3-zone + 40%ML + 60%h_blend
 │   ├── submission_v21_A.csv          # 3-zone + pure ML
 │   ├── submission_v20_MEGA.csv       # 3-zone + alt calibration
