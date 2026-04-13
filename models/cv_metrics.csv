@@ -1,0 +1,4 @@
+model,c_index
+CoxPH,0.93
+XGB-AFT,0.95
+RSF,0.94
